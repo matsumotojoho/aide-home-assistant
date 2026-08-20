@@ -158,6 +158,8 @@ export class ToolRegistry {
         ? { ok: true, data: outcome.data ?? outcome.summary }
         : { ok: false, error: outcome.error ?? '実行に失敗しました' };
     } catch (err) {
+      // ユーザーへは平易な message のみ返し、技術的詳細はサーバーログへ (仕様書34)
+      console.error(`[tool] ${name} 失敗:`, err);
       const message = err instanceof Error ? err.message : String(err);
       this.logAction(ctx, { name, input, status: 'failed', error: message });
       return { ok: false, error: message };

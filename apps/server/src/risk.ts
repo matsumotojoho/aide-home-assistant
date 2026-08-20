@@ -21,7 +21,13 @@ export function categorize(tool: string, input: Record<string, unknown>): RiskCa
   if (MASS_DELETE_PATTERNS.test(text)) return 'mass_delete';
 
   switch (tool) {
-    case 'home.execute':
+    case 'home.execute': {
+      const entityId = String((input as { entity_id?: string }).entity_id ?? '');
+      const service = String((input as { service?: string }).service ?? '');
+      // 解錠は物理セキュリティに関わるため家電操作と同列にしない (施錠側は通常操作)
+      if (entityId.startsWith('lock.') && /unlock|open/i.test(service)) return 'security_change';
+      return 'home_control';
+    }
     case 'home.get_state':
       return 'home_control';
     case 'memory.write':

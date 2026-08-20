@@ -87,7 +87,7 @@ export class Orchestrator {
         { entity_id: intent.entityId, domain: intent.domain, service: intent.service, data: intent.data },
         ctx,
       );
-      reply = result.ok ? intent.speak : `すみません、実行できませんでした。${result.error ?? ''}`;
+      reply = result.ok ? intent.speak : `すみません、${result.error ?? '実行できませんでした'}`;
     } else {
       // B〜E. Claudeによる判断
       try {

@@ -17,6 +17,31 @@ export type HaProxy = (params: {
   body?: unknown;
 }) => Promise<{ status: number; body: unknown }>;
 
+/**
+ * HTTPステータスをユーザー向けの平易な日本語にする (仕様書34: Stack Trace/生エラーを返さない)。
+ * 技術的な詳細は message ではなく detail に保持し、サーバーログ側で参照する。
+ */
+export class HaRequestError extends Error {
+  constructor(
+    public status: number,
+    public detail: string,
+    public path: string,
+  ) {
+    super(HaRequestError.userMessage(status));
+    this.name = 'HaRequestError';
+  }
+
+  static userMessage(status: number): string {
+    if (status === 401 || status === 403) return 'Home Assistantの認証に失敗しました。トークンを再設定してください';
+    if (status === 404) return 'その機器が見つかりませんでした';
+    if (status >= 500) {
+      // HAは機器がオフライン等で操作できない場合も500を返す
+      return '機器が応答しませんでした。電源が入っているか、ネットワークに繋がっているか確認してください';
+    }
+    return '操作を実行できませんでした';
+  }
+}
+
 export class HomeAssistantClient {
   constructor(
     private baseUrl: string,
@@ -44,7 +69,8 @@ export class HomeAssistantClient {
           signal: ctrl.signal,
         });
         if (!res.ok) {
-          throw new Error(`Home Assistant応答エラー (${res.status})`);
+          const detail = await res.text().catch(() => '');
+          throw new HaRequestError(res.status, detail, path);
         }
         return await res.json().catch(() => ({}));
       } finally {
@@ -55,7 +81,7 @@ export class HomeAssistantClient {
     if (proxyFn) {
       const { status, body: resBody } = await proxyFn({ method, path, body });
       if (status < 200 || status >= 300) {
-        throw new Error(`Home Assistant応答エラー (${status})`);
+        throw new HaRequestError(status, JSON.stringify(resBody).slice(0, 300), path);
       }
       return resBody;
     }

@@ -8,6 +8,12 @@ describe('Risk Engine', () => {
     expect(riskLabel(cat)).toBe('low');
   });
 
+  it('解錠は security_change (確認必須)、施錠は通常の家電操作', () => {
+    expect(categorize('home.execute', { entity_id: 'lock.front_door', service: 'unlock' })).toBe('security_change');
+    expect(categorize('home.execute', { entity_id: 'lock.front_door', service: 'open' })).toBe('security_change');
+    expect(categorize('home.execute', { entity_id: 'lock.front_door', service: 'lock' })).toBe('home_control');
+  });
+
   it('購入系キーワードは purchase (high)', () => {
     const cat = categorize('mac.execute', { command: 'Amazonでトイレットペーパーを購入する' });
     expect(cat).toBe('purchase');

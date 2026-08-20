@@ -9,6 +9,7 @@ import { makeTestEnv, TEST_DEVICES } from './helpers.js';
 import { devices } from '../src/db/schema.js';
 import { Orchestrator, parseAgentTurn } from '../src/orchestrator.js';
 import { ProviderUnavailableError, type ProviderSelector } from '../src/llm/index.js';
+import { HaRequestError } from '../src/ha/client.js';
 
 function seedDevices(env: ReturnType<typeof makeTestEnv>) {
   for (const d of TEST_DEVICES) {
@@ -100,8 +101,22 @@ describe('Claude障害フォールバック', () => {
       text: '寝室の電気つけて',
       source: 'web',
     });
-    expect(result.reply).toContain('実行できませんでした');
+    expect(result.reply).toMatch(/^すみません、/);
     expect(result.reply).not.toContain('at ');
+    expect(result.reply).not.toMatch(/Error:|ECONNREFUSED|\bstack\b/);
+  });
+});
+
+describe('Home Assistantエラーのユーザー向け変換 (仕様書34)', () => {
+  it('HTTPステータスを平易な日本語にし、数字を露出しない', () => {
+    const offline = new HaRequestError(500, 'SwitchBotDeviceOfflineError', '/api/services/light/turn_off');
+    expect(offline.message).toContain('電源');
+    expect(offline.message).not.toContain('500');
+    // 技術的詳細は保持され、ログ側で参照できる
+    expect(offline.detail).toContain('SwitchBotDeviceOffline');
+
+    expect(new HaRequestError(401, '', '/api/states').message).toContain('認証');
+    expect(new HaRequestError(404, '', '/api/states').message).toContain('見つかりません');
   });
 });
 
