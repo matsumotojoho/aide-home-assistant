@@ -1,6 +1,6 @@
 import { config as loadEnv } from 'dotenv';
 import { randomBytes } from 'node:crypto';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // .env はリポジトリルートに置く (カレントディレクトリの .env も後勝ちで読む)
@@ -24,10 +24,16 @@ function required(name: string, devFallback?: () => string): string {
   return '';
 }
 
+// DATA_DIRが相対パスの場合はリポジトリルート基準で解決する。
+// (npm run -w はcwdをワークスペースへ移すため、cwd基準だとDBの場所がブレる)
+const repoRoot = resolve(__dirname, '../../..');
+const rawDataDir = process.env.DATA_DIR ?? './data';
+const dataDir = isAbsolute(rawDataDir) ? rawDataDir : resolve(repoRoot, rawDataDir);
+
 export const config = {
   isProd,
   port: Number(process.env.PORT ?? 8787),
-  dataDir: process.env.DATA_DIR ?? './data',
+  dataDir,
   publicUrl: process.env.PUBLIC_URL ?? `http://localhost:${process.env.PORT ?? 8787}`,
   sessionSecret: required('SESSION_SECRET', () => randomBytes(32).toString('hex')),
   authPasswordHash: process.env.AUTH_PASSWORD_HASH ?? '',

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Aide Backend の常駐設定 (Mac miniローカル運用時)
+  Railwayへ移行したらこのサービスは unload してよい。
+  導入: sed "s|__HOME__|$HOME|g" ops/mac-agent/com.aide.server.plist > ~/Library/LaunchAgents/com.aide.server.plist
+        launchctl load ~/Library/LaunchAgents/com.aide.server.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.aide.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/.nvm/versions/node/v22.20.0/bin/node</string>
+    <string>__HOME__/aide/node_modules/tsx/dist/cli.mjs</string>
+    <string>__HOME__/aide/apps/server/src/index.ts</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__HOME__/aide</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__HOME__/.aide/server.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.aide/server.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/.nvm/versions/node/v22.20.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>DATA_DIR</key>
+    <string>__HOME__/aide/data</string>
+  </dict>
+</dict>
+</plist>
