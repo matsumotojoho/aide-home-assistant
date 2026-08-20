@@ -27,24 +27,44 @@ docker compose up -d
 ```
 
 1. `http://localhost:8123` を開き、オーナーアカウントを作成
-2. プロフィール → セキュリティ → **長期アクセストークン** を発行
-3. `.env` の `HA_TOKEN` に設定 (`HA_BASE_URL=http://localhost:8123`)
+2. 左下のユーザー名 → セキュリティタブ → 一番下の **長期アクセストークン** を発行 (名前は「Aide」等)
+3. トークンを両方の設定ファイルへ反映してサービス再起動:
+
+```sh
+./ops/set-ha-token.sh <発行したトークン>
+curl -s http://localhost:8787/api/status   # ha.configured が true ならOK
+```
 
 ### 機器連携 (colima=VM経由の制約に注意)
 
+colimaはLinux VM上でDockerを動かすため、**Bluetooth直結とmDNS/Matter等のLAN内自動検出は使えない前提**で連携方法を選ぶ。
+
 | 機器 | 連携方法 |
 |---|---|
-| SwitchBot | **SwitchBotハブ必須**。HAの「SwitchBot Cloud」統合 (SwitchBotアプリでトークン/シークレット発行)。BLE直結はVMのため不可 |
-| IKEA (DIRIGERA) | HAの「IKEA DIRIGERA」統合。mDNS検出が効かない場合はハブのIPを手動入力 |
-| エアコン/テレビ | SwitchBotハブの赤外線リモコン登録 → HAに露出 / またはメーカー公式統合 |
+| SwitchBot | **SwitchBotハブ経由のクラウドAPI**を使う (HAの SwitchBot Cloud 統合)。トークン/シークレットはSwitchBotアプリのプロフィール→設定→開発者オプションで発行。BLE直結はVMのため不可 |
+| IKEA | ハブの型番で手順が変わる。DIRIGERA=Matter/専用統合、TRÅDFRIゲートウェイ=IKEA TRÅDFRI統合。**導入前にHAの統合一覧で現行の対応状況を確認する**。自動検出が効かない場合はハブのIPを手動入力 |
+| エアコン/テレビ | SwitchBotハブの赤外線リモコンに登録 → クラウドAPI経由でHAに露出。またはメーカー公式統合 |
+
+自動検出やMatterがどうしても必要になった場合の代替: Home AssistantをMac上のDockerではなく、別のRaspberry Pi等(HAOS)へ移す。その場合もAide側は `HA_BASE_URL` の変更だけで済む (Mac AgentのHAプロキシも同様)。
 
 連携後、HAの entity_id (例: `light.bedroom`) を確認し、**PWAの設定タブ→デバイス登録**で日本語名・部屋とともに登録する (Routerの高速分類に使われる)。
 
-### Mac起動時の自動起動
+### Mac起動時の自動起動 (設定済み)
 
 ```sh
-brew services start colima   # colima自動起動 (dockerコンテナはrestart:unless-stoppedで復帰)
+brew services start colima   # colima自動起動 (HAコンテナはrestart:unless-stoppedで復帰)
 ```
+
+Backend / Mac Agent も launchd で常駐化済み:
+
+```sh
+launchctl list | grep aide            # com.aide.server / com.aide.agent
+launchctl kickstart -k gui/$(id -u)/com.aide.server   # 再起動
+tail -f ~/.aide/server.log ~/.aide/agent.log          # ログ
+```
+
+Railwayへ移行したらローカルBackendは停止してよい:
+`launchctl unload ~/Library/LaunchAgents/com.aide.server.plist`
 
 ## 3. Backendをローカルで起動 (開発)
 
