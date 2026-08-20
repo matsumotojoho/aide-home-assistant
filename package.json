@@ -1,0 +1,23 @@
+{
+  "name": "aide",
+  "private": true,
+  "version": "0.1.0",
+  "description": "自分専用AI生活アシスタント (personal AI life agent)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "setup": "node --experimental-strip-types apps/server/scripts/init-env.ts",
+    "dev:server": "npm run dev -w @aide/server",
+    "dev:web": "npm run dev -w @aide/web",
+    "dev:agent": "npm run dev -w @aide/mac-agent",
+    "build": "npm run build -w @aide/web",
+    "typecheck": "npm run typecheck -w @aide/server -w @aide/mac-agent",
+    "test": "npm run test -w @aide/server",
+    "start": "npm run start -w @aide/server"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,18 @@
+# Home Assistant (Mac mini / colima 上で動作)
+# 起動: colima start --cpu 2 --memory 3 && docker compose up -d
+# 初期設定: http://localhost:8123
+#
+# 注意 (docs/setup.md 参照):
+# - colimaはVM経由のためBluetooth直結が使えない → SwitchBotは「SwitchBotハブ + 公式Cloud API連携」を使う
+# - mDNS自動検出も制限される → IKEA DIRIGERA等はハブのIPを手動指定して連携する
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: aide-homeassistant
+    restart: unless-stopped
+    ports:
+      - '8123:8123'
+    volumes:
+      - ./config:/config
+    environment:
+      - TZ=Asia/Tokyo

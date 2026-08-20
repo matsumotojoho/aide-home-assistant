@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Aide Mac Agent launchd 設定テンプレート
+  1. __HOME__ を実際のホームディレクトリに置換
+  2. ~/Library/LaunchAgents/com.aide.agent.plist に配置
+  3. launchctl load ~/Library/LaunchAgents/com.aide.agent.plist
+  接続先やトークンは ~/.aide/agent.env に記述する (docs/setup.md参照)
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.aide.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/.nvm/versions/node/v22.20.0/bin/node</string>
+    <string>__HOME__/aide/node_modules/tsx/dist/cli.mjs</string>
+    <string>__HOME__/aide/apps/mac-agent/src/index.ts</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__HOME__/aide/apps/mac-agent</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__HOME__/.aide/agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.aide/agent.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/.nvm/versions/node/v22.20.0/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>

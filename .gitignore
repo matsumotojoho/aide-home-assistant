@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# build outputs
+dist/
+*.tsbuildinfo
+
+# environment / secrets — never commit
+.env
+.env.*
+!.env.example
+
+# runtime data
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Home Assistant config (contains tokens/secrets)
+ops/homeassistant/config/
+
+# macOS
+.DS_Store
+
+# logs
+*.log
