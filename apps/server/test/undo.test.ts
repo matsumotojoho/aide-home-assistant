@@ -27,10 +27,50 @@ describe('Undo', () => {
     const undoResult = await applyUndo(env.db, env.ha as unknown as HomeAssistantClient, action!.id);
     expect(undoResult.ok).toBe(true);
 
-    // 復元呼び出しは温度27に戻す
-    const restoreCall = env.ha.calls.at(-1)!;
-    expect(restoreCall.service).toBe('set_temperature');
-    expect(restoreCall.data.temperature).toBe(27);
+    // 復元は「モードを戻す→温度を戻す」の2段階 (set_temperatureにモードを載せても
+    // 反映しない統合があるため)
+    const restoreCalls = env.ha.calls.slice(-2);
+    expect(restoreCalls[0].service).toBe('set_hvac_mode');
+    expect(restoreCalls[0].data.hvac_mode).toBe('cool');
+    expect(restoreCalls[1].service).toBe('set_temperature');
+    expect(restoreCalls[1].data.temperature).toBe(27);
+  });
+
+  it('エアコンのモード変更は set_hvac_mode を先に単独で呼ぶ', async () => {
+    const env = makeTestEnv();
+    env.ha.states.set('climate.living', {
+      entity_id: 'climate.living',
+      state: 'fan_only',
+      attributes: { temperature: 21 },
+    });
+
+    await env.registry.execute(
+      'home.execute',
+      { entity_id: 'climate.living', service: 'set_temperature', data: { hvac_mode: 'cool', temperature: 26 } },
+      env.ctx,
+    );
+
+    expect(env.ha.calls).toHaveLength(2);
+    expect(env.ha.calls[0]).toMatchObject({ service: 'set_hvac_mode', data: { hvac_mode: 'cool' } });
+    expect(env.ha.calls[1]).toMatchObject({ service: 'set_temperature', data: { temperature: 26 } });
+  });
+
+  it('モード指定がなければ set_temperature のみ (余計な呼び出しをしない)', async () => {
+    const env = makeTestEnv();
+    env.ha.states.set('climate.living', {
+      entity_id: 'climate.living',
+      state: 'cool',
+      attributes: { temperature: 26 },
+    });
+
+    await env.registry.execute(
+      'home.execute',
+      { entity_id: 'climate.living', service: 'set_temperature', data: { temperature: 24 } },
+      env.ctx,
+    );
+
+    expect(env.ha.calls).toHaveLength(1);
+    expect(env.ha.calls[0].service).toBe('set_temperature');
   });
 
   it('二重Undoは拒否される', async () => {

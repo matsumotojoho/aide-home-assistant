@@ -61,6 +61,16 @@ export const homeExecute: ToolDef = {
 
     // Undo用に実行前状態を取得
     const before = await ctx.ha.getState(entityId);
+
+    // SwitchBot Cloud等の一部統合は set_temperature に同梱した hvac_mode を無視するため、
+    // モード変更を伴う場合は set_hvac_mode を先に単独で呼ぶ。
+    // (AI側は「冷房26℃にして」を1回の呼び出しで表現できるままにする)
+    if (domain === 'climate' && service === 'set_temperature' && data.hvac_mode) {
+      await ctx.ha.callService('climate', 'set_hvac_mode', {
+        entity_id: entityId,
+        hvac_mode: data.hvac_mode,
+      });
+    }
     await ctx.ha.callService(domain, service, data);
 
     const undo = before

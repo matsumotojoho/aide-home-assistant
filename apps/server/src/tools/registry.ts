@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { v4 as uuid } from 'uuid';
 import type { ToolResult } from '@aide/shared';
 import type { Db } from '../db/index.js';
-import { actions, approvals, undoRecords } from '../db/schema.js';
+import { and, eq } from 'drizzle-orm';
+import { actions, approvals, devices, undoRecords } from '../db/schema.js';
 import { categorize, riskLabel } from '../risk.js';
 import type { HomeAssistantClient } from '../ha/client.js';
 import type { AgentGateway } from '../agentGateway.js';
@@ -103,7 +104,7 @@ export class ToolRegistry {
             id: approvalId,
             userId: ctx.userId,
             kind: 'tool_execution',
-            title: approvalTitle(name, category, input),
+            title: approvalTitle(ctx, name, category, input),
             payload: JSON.stringify({ tool: name, input, category, riskLabel: riskLabel(category) }),
             status: 'pending',
             createdAt: now,
@@ -115,7 +116,7 @@ export class ToolRegistry {
           ctx.settings,
           'important',
           '承認が必要な操作があります',
-          approvalTitle(name, category, input),
+          approvalTitle(ctx, name, category, input),
         );
         return {
           ok: false,
@@ -209,12 +210,52 @@ function splitToolName(name: string): [string, string | null] {
   return idx === -1 ? [name, null] : [name.slice(0, idx), name.slice(idx + 1)];
 }
 
-function approvalTitle(tool: string, category: string, input: Record<string, unknown>): string {
+/**
+ * 承認画面はスマホに出るため、何を許可するのかが一目で分かる日本語にする (仕様書16)。
+ * ツール名やカテゴリ名のような内部語彙は出さない。
+ */
+function approvalTitle(
+  ctx: ToolContext,
+  tool: string,
+  category: string,
+  input: Record<string, unknown>,
+): string {
+  if (tool === 'home.execute') {
+    const entityId = String((input as { entity_id?: string }).entity_id ?? '');
+    const service = String((input as { service?: string }).service ?? '');
+    const name = lookupDeviceName(ctx, entityId);
+    if (entityId.startsWith('lock.')) {
+      return /unlock|open/i.test(service) ? `${name}を解錠します` : `${name}を施錠します`;
+    }
+    const action = service === 'turn_on' ? 'つけます' : service === 'turn_off' ? '消します' : `${service}を実行します`;
+    return `${name}を${action}`;
+  }
   if (tool === 'mac.execute') {
-    return `Mac操作の許可: ${String((input as { command?: string }).command ?? '').slice(0, 80)}`;
+    const kind = String((input as { kind?: string }).kind ?? '');
+    const command = String((input as { command?: string }).command ?? '');
+    const label = kind === 'open_app' ? 'アプリを起動' : kind === 'applescript' ? 'Mac操作' : 'コマンド実行';
+    return `Macで${label}: ${command.slice(0, 80)}`;
   }
   if (tool === 'message.send' || tool === 'message.prepare') {
-    return `メッセージ送信の確認`;
+    const to = String((input as { to?: string }).to ?? '相手');
+    return `${to}へメッセージを送信します`;
   }
-  return `${tool} の実行許可 (${category})`;
+  if (tool === 'mail.send') {
+    return 'メールを送信します';
+  }
+  return `${tool} を実行します (${category})`;
+}
+
+function lookupDeviceName(ctx: ToolContext, entityId: string): string {
+  if (!entityId) return '機器';
+  try {
+    const row = ctx.db
+      .select()
+      .from(devices)
+      .where(and(eq(devices.userId, ctx.userId), eq(devices.entityId, entityId)))
+      .get();
+    return row?.name ?? entityId;
+  } catch {
+    return entityId;
+  }
 }

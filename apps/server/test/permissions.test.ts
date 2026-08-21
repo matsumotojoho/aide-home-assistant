@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { v4 as uuid } from 'uuid';
 import { makeTestEnv } from './helpers.js';
-import { approvals } from '../src/db/schema.js';
+import { approvals, devices } from '../src/db/schema.js';
 
 describe('Permissions + 承認フロー', () => {
   it('home_control は既定で always_allow → 即実行', async () => {
@@ -65,6 +65,30 @@ describe('Permissions + 承認フロー', () => {
     );
     expect(result.ok).toBe(true);
     expect(env.ha.calls).toHaveLength(1);
+  });
+
+  it('承認画面の文言は内部語彙でなく日本語のデバイス名で出す', async () => {
+    const env = makeTestEnv();
+    env.db
+      .insert(devices)
+      .values({
+        id: uuid(),
+        userId: env.userId,
+        entityId: 'lock.front',
+        name: '玄関の鍵',
+        room: '玄関',
+        type: 'lock',
+        aliases: '[]',
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    await env.registry.execute('home.execute', { entity_id: 'lock.front', service: 'unlock' }, env.ctx);
+
+    const row = env.db.select().from(approvals).all()[0];
+    expect(row.title).toBe('玄関の鍵を解錠します');
+    expect(row.title).not.toContain('home.execute');
+    expect(row.title).not.toContain('security_change');
   });
 
   it('listAll は全カテゴリのモードを返す', () => {

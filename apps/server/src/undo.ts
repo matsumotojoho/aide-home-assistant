@@ -32,7 +32,16 @@ export async function applyUndo(
       if (attrs.temperature !== undefined) data.temperature = attrs.temperature;
       if (attrs.hvac_mode !== undefined) data.hvac_mode = attrs.hvac_mode;
       else if (prevState && prevState !== 'unavailable') data.hvac_mode = prevState;
-      await ha.callService('climate', 'set_temperature', data);
+      // モードは set_temperature では反映されない統合があるため先に単独で戻す
+      if (data.hvac_mode !== undefined) {
+        await ha.callService('climate', 'set_hvac_mode', {
+          entity_id: entityId,
+          hvac_mode: data.hvac_mode,
+        });
+      }
+      if (data.temperature !== undefined) {
+        await ha.callService('climate', 'set_temperature', data);
+      }
     } else if (domain === 'light') {
       const data: Record<string, unknown> = { entity_id: entityId };
       if (attrs.brightness !== undefined) data.brightness = attrs.brightness;
