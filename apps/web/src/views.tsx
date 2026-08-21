@@ -542,6 +542,71 @@ const CATEGORY_LABELS: Record<string, string> = {
   system: 'システム情報',
 };
 
+function DeviceRowEditor({ device, onChanged }: { device: DeviceRow; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(device.name);
+  const [room, setRoom] = useState(device.room ?? '');
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.patch(`/devices/${device.id}`, { name, room: room.trim() || null });
+      setEditing(false);
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="row" style={{ marginBottom: 6 }}>
+        <div className="grow">
+          <b>{device.name}</b>{' '}
+          <span className="meta">
+            {device.room ?? '部屋未設定'} / {device.type} / {device.entityId}
+          </span>
+        </div>
+        <button className="btn sm secondary" onClick={() => setEditing(true)}>
+          編集
+        </button>
+        <button className="btn sm danger" onClick={() => api.del(`/devices/${device.id}`).then(onChanged)}>
+          削除
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid var(--border)' }}>
+      <label className="field">
+        <span>名前</span>
+        <input value={name} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label className="field">
+        <span>部屋 (空欄で未設定)</span>
+        <input value={room} onChange={(e) => setRoom(e.target.value)} placeholder="例: 寝室" />
+      </label>
+      <div className="row">
+        <button className="btn sm" disabled={busy} onClick={() => void save()}>
+          保存
+        </button>
+        <button
+          className="btn sm secondary"
+          onClick={() => {
+            setName(device.name);
+            setRoom(device.room ?? '');
+            setEditing(false);
+          }}
+        >
+          取消
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsView() {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [perms, setPerms] = useState<PermissionRow[]>([]);
@@ -690,17 +755,7 @@ export function SettingsView() {
       <h2 className="section">デバイス登録</h2>
       <div className="card">
         {devices.map((d) => (
-          <div className="row" key={d.id} style={{ marginBottom: 6 }}>
-            <div className="grow">
-              <b>{d.name}</b>{' '}
-              <span className="meta">
-                {d.entityId} / {d.room ?? '-'} / {d.type}
-              </span>
-            </div>
-            <button className="btn sm danger" onClick={() => api.del(`/devices/${d.id}`).then(refresh)}>
-              削除
-            </button>
-          </div>
+          <DeviceRowEditor key={d.id} device={d} onChanged={refresh} />
         ))}
         <label className="field">
           <span>entity_id (Home Assistant)</span>

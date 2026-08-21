@@ -55,6 +55,72 @@ describe('Undo', () => {
     expect(env.ha.calls[1]).toMatchObject({ service: 'set_temperature', data: { temperature: 26 } });
   });
 
+  it('オフラインの機器は成功と誤報告せず、実行もしない', async () => {
+    const env = makeTestEnv();
+    env.ha.states.set('light.bedroom', {
+      entity_id: 'light.bedroom',
+      state: 'unavailable',
+      attributes: {},
+    });
+
+    const result = await env.registry.execute(
+      'home.execute',
+      { entity_id: 'light.bedroom', service: 'turn_on' },
+      env.ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('オフライン');
+    expect(env.ha.calls).toHaveLength(0); // HAへ投げない
+  });
+
+  it('HAが黙って処理を飛ばした場合 (オフライン) は成功と誤報告しない', async () => {
+    const env = makeTestEnv();
+    // 実行前は off に見えるが、HAは空応答を返し、直後の再取得で unavailable と判明する
+    // (実機で観測されたパターン。断続的にオフラインになる)
+    env.ha.states.set('switch.dining', { entity_id: 'switch.dining', state: 'off', attributes: {} });
+    env.ha.skipNext = true;
+    let reads = 0;
+    env.ha.getState = async (id: string) => {
+      reads++;
+      return { entity_id: id, state: reads === 1 ? 'off' : 'unavailable', attributes: {} };
+    };
+
+    const result = await env.registry.execute(
+      'home.execute',
+      { entity_id: 'switch.dining', service: 'turn_on' },
+      env.ctx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('オフライン');
+  });
+
+  it('呼び出し側が誤ったドメインを指定してもentity_id側を優先する', async () => {
+    const env = makeTestEnv();
+    env.ha.states.set('switch.dining', { entity_id: 'switch.dining', state: 'off', attributes: {} });
+
+    await env.registry.execute(
+      'home.execute',
+      { entity_id: 'switch.dining', domain: 'light', service: 'turn_on' },
+      env.ctx,
+    );
+
+    expect(env.ha.calls[0].domain).toBe('switch');
+  });
+
+  it('存在しない機器は「見つかりません」を返す', async () => {
+    const env = makeTestEnv();
+    const result = await env.registry.execute(
+      'home.execute',
+      { entity_id: 'light.nonexistent', service: 'turn_on' },
+      env.ctx,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('見つかりません');
+    expect(env.ha.calls).toHaveLength(0);
+  });
+
   it('モード指定がなければ set_temperature のみ (余計な呼び出しをしない)', async () => {
     const env = makeTestEnv();
     env.ha.states.set('climate.living', {

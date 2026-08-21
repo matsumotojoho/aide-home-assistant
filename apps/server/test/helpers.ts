@@ -23,13 +23,29 @@ export class FakeHa {
   async getState(entityId: string): Promise<HaState | null> {
     return this.states.get(entityId) ?? null;
   }
+  /** trueにすると、HAが「オフラインで飛ばした」時と同じ空応答を返す */
+  skipNext = false;
+
   async callService(domain: string, service: string, data: Record<string, unknown>): Promise<unknown> {
     if (this.failNext) {
       this.failNext = false;
       throw new Error('HA接続エラー(テスト)');
     }
     this.calls.push({ domain, service, data });
-    return {};
+    if (this.skipNext) {
+      this.skipNext = false;
+      return [];
+    }
+    // 実機同様、変化した状態の配列を返す
+    const entityId = String(data.entity_id ?? '');
+    const prev = this.states.get(entityId);
+    const next: HaState = {
+      entity_id: entityId,
+      state: service.includes('off') ? 'off' : (prev?.state ?? 'on'),
+      attributes: { ...(prev?.attributes ?? {}), ...data },
+    };
+    this.states.set(entityId, next);
+    return [next];
   }
 }
 

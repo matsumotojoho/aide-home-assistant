@@ -18,6 +18,26 @@ describe('Router classifier', () => {
     if (intent.kind === 'home_direct') expect(intent.service).toBe('turn_off');
   });
 
+  it('HAドメインは種別ではなくentity_idから決める (赤外線照明は switch.*)', () => {
+    // 赤外線リモコン経由の照明: 分類のため type=light だが entity_id は switch.*
+    const irLight = [
+      { entityId: 'switch.dining_light', name: 'ダイニングの電気', room: 'ダイニング', type: 'light', aliases: [] },
+    ];
+    const intent = classify('ダイニングの電気つけて', irLight);
+    expect(intent.kind).toBe('home_direct');
+    if (intent.kind === 'home_direct') {
+      // light.turn_on を switch.* に投げるとHAは200を返しつつ何もしない
+      expect(intent.domain).toBe('switch');
+      expect(intent.service).toBe('turn_on');
+    }
+  });
+
+  it('テレビ (media_player.*) もentity_idのドメインを使う', () => {
+    const intent = classify('テレビつけて', TEST_DEVICES);
+    expect(intent.kind).toBe('home_direct');
+    if (intent.kind === 'home_direct') expect(intent.domain).toBe('media_player');
+  });
+
   it('エイリアス指定 (テレビつけて) は home_direct', () => {
     const intent = classify('テレビつけて', TEST_DEVICES);
     expect(intent.kind).toBe('home_direct');

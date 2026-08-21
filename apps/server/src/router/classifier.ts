@@ -41,12 +41,19 @@ const MAC_RE = /(Mac|マック|PC|パソコン|ターミナル|ファイル|フ�
 const HOME_CONTEXT_RE =
   /部屋|家|リビング|寝室|エアコン|クーラー|冷房|暖房|除湿|照明|電気|ライト|明かり|テレビ|温度|湿度|室温|明るく|暗く/;
 
-const SERVICE_BY_TYPE: Record<string, { domain: string; on: string; off: string }> = {
-  light: { domain: 'light', on: 'turn_on', off: 'turn_off' },
-  tv: { domain: 'media_player', on: 'turn_on', off: 'turn_off' },
-  switch: { domain: 'switch', on: 'turn_on', off: 'turn_off' },
-  climate: { domain: 'climate', on: 'turn_on', off: 'turn_off' },
+// ON/OFFのサービス名。HAのドメインは種別ではなく entity_id から決まる点に注意
+// (例: 赤外線リモコンの照明は type=light でも entity_id は switch.* になる)。
+const SERVICE_BY_TYPE: Record<string, { on: string; off: string }> = {
+  light: { on: 'turn_on', off: 'turn_off' },
+  tv: { on: 'turn_on', off: 'turn_off' },
+  switch: { on: 'turn_on', off: 'turn_off' },
+  climate: { on: 'turn_on', off: 'turn_off' },
 };
+
+/** HAのサービス呼び出しは対象エンティティ自身のドメインに向ける必要がある */
+function domainOf(entityId: string): string {
+  return entityId.split('.')[0];
+}
 
 function findRoom(text: string, devices: DeviceInfo[]): string | null {
   const rooms = [...new Set(devices.map((d) => d.room).filter((r): r is string => Boolean(r)))];
@@ -141,7 +148,7 @@ export function classify(rawText: string, devices: DeviceInfo[], defaultRoom = '
         return {
           kind: 'home_direct',
           entityId: d.entityId,
-          domain: svc.domain,
+          domain: domainOf(d.entityId),
           service: isOn ? svc.on : svc.off,
           data: { entity_id: d.entityId },
           speak: isOn ? `${d.name}をつけました` : `${d.name}を消しました`,

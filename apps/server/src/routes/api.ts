@@ -182,6 +182,30 @@ export function createApi(deps: ApiDeps): Hono {
     return c.json({ ok: true, id });
   });
 
+  api.patch('/devices/:id', async (c) => {
+    const patch = deviceSchema.partial().safeParse(await c.req.json());
+    if (!patch.success) return c.json({ error: patch.error.issues[0]?.message }, 400);
+    const row = db
+      .select()
+      .from(devices)
+      .where(and(eq(devices.id, c.req.param('id')), eq(devices.userId, userId)))
+      .get();
+    if (!row) return c.json({ error: 'not found' }, 404);
+    db.update(devices)
+      .set({
+        entityId: patch.data.entityId ?? row.entityId,
+        name: patch.data.name ?? row.name,
+        // room は null での明示的なクリアを許可する
+        room: patch.data.room !== undefined ? patch.data.room : row.room,
+        type: patch.data.type ?? row.type,
+        aliases: patch.data.aliases ? JSON.stringify(patch.data.aliases) : row.aliases,
+      })
+      .where(eq(devices.id, row.id))
+      .run();
+    const updated = db.select().from(devices).where(eq(devices.id, row.id)).get()!;
+    return c.json({ ...updated, aliases: updated.aliases ? JSON.parse(updated.aliases) : [] });
+  });
+
   api.delete('/devices/:id', (c) => {
     db.delete(devices).where(and(eq(devices.id, c.req.param('id')), eq(devices.userId, userId))).run();
     return c.json({ ok: true });

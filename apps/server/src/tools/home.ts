@@ -55,12 +55,31 @@ export const homeExecute: ToolDef = {
       return { ok: false, error: 'Home Assistantが未接続です' };
     }
     const entityId = String(input.entity_id);
-    const domain = (input.domain as string | undefined) ?? entityId.split('.')[0];
+    // ドメインは必ず entity_id から決める。呼び出し側が別ドメインを指定しても従わない。
+    // (例: light.turn_off を switch.* に対して呼ぶと、HAは200を返しつつ何もしない)
+    const domain = entityId.split('.')[0];
+    const requestedDomain = input.domain as string | undefined;
+    if (requestedDomain && requestedDomain !== domain) {
+      console.warn(`[home.execute] domain=${requestedDomain} は ${entityId} と不一致のため ${domain} で実行します`);
+    }
     const service = String(input.service);
     const data = { entity_id: entityId, ...((input.data as Record<string, unknown>) ?? {}) };
 
-    // Undo用に実行前状態を取得
+    // Undo用に実行前状態を取得。あわせて実行可否を確認する。
+    // HAは対象が unavailable でもサービス呼び出しに200を返し、実際には何もしない
+    // (ログに warning が出るだけ)。そのまま成功扱いにすると「つけました」と言って
+    // 実際は何も起きていない、という最悪の誤報告になるため事前に弾く。
     const before = await ctx.ha.getState(entityId);
+    if (!before) {
+      return { ok: false, error: 'その機器が見つかりませんでした', target: entityId };
+    }
+    if (before.state === 'unavailable') {
+      return {
+        ok: false,
+        error: '機器がオフラインのため操作できませんでした。電源とネットワークを確認してください',
+        target: entityId,
+      };
+    }
 
     // SwitchBot Cloud等の一部統合は set_temperature に同梱した hvac_mode を無視するため、
     // モード変更を伴う場合は set_hvac_mode を先に単独で呼ぶ。
@@ -71,7 +90,21 @@ export const homeExecute: ToolDef = {
         hvac_mode: data.hvac_mode,
       });
     }
-    await ctx.ha.callService(domain, service, data);
+    const response = await ctx.ha.callService(domain, service, data);
+
+    // HAはサービス呼び出しで変化した状態の配列を返す。対象が含まれていれば確実に届いている。
+    // 含まれない場合は「元々その状態だった(冪等)」か「オフラインで飛ばされた」かの
+    // どちらかなので、状態を取り直して判別する。
+    if (!responseIncludes(response, entityId)) {
+      const after = await ctx.ha.getState(entityId);
+      if (!after || after.state === 'unavailable') {
+        return {
+          ok: false,
+          error: '機器がオフラインのため操作できませんでした。電源とネットワークを確認してください',
+          target: entityId,
+        };
+      }
+    }
 
     const undo = before
       ? {
@@ -94,6 +127,12 @@ export const homeExecute: ToolDef = {
     };
   },
 };
+
+/** HAのサービス応答 (変化した状態の配列) に対象エンティティが含まれるか */
+function responseIncludes(response: unknown, entityId: string): boolean {
+  if (!Array.isArray(response)) return false;
+  return response.some((s) => (s as { entity_id?: string })?.entity_id === entityId);
+}
 
 function pickAttrs(attrs: Record<string, unknown>): Record<string, unknown> {
   const keep = ['friendly_name', 'temperature', 'current_temperature', 'hvac_mode', 'brightness', 'media_title'];
