@@ -112,6 +112,10 @@ Claudeとの対話はJSONプロトコル (Provider非依存):
 {"type":"tool_calls","calls":[{"tool":"home.execute","input":{...}}]}
 {"type":"final","speak":"...","save_memory":[...]}
 ```
+`tool_calls` に `speak` を添えると、全ツール成功時はその文をそのまま返してLLMへの往復を省く。
+LLM 1回あたり8〜10秒かかるため、これで曖昧な指示の応答が約半分になる。失敗があった場合は
+結果を渡して考え直させる。
+
 最大6イテレーションのツールループ。Context Builderは System policy / 現在時刻 / 登録デバイス / 関連記憶 (FTS検索) / 直近会話 / 予約タスク / ユーザー依頼のみを送る (全履歴は送らない)。
 
 Anthropic API Provider有効時はネイティブtool_useへの置き換えが可能な構造 (Provider内で変換)。

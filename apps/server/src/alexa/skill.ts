@@ -118,13 +118,24 @@ function closingReply(raw: string): string {
   return 'はい、またどうぞ。';
 }
 
-function speechResponse(text: string, endSession: boolean, reprompt?: string): Record<string, unknown> {
+/**
+ * 返答を組み立てる。
+ * repromptを付けるとAlexaは無言のたびに聞き返すため、既定(quiet)では付けない。
+ * マイクは shouldEndSession:false で開いたままなので、続けて話しかけることはできる。
+ */
+function speechResponse(
+  text: string,
+  endSession: boolean,
+  opts: { followup?: 'quiet' | 'ask' | 'off'; reprompt?: string } = {},
+): Record<string, unknown> {
+  const followup = opts.followup ?? 'quiet';
+  const close = endSession || followup === 'off';
   const response: Record<string, unknown> = {
     outputSpeech: { type: 'PlainText', text },
-    shouldEndSession: endSession,
+    shouldEndSession: close,
   };
-  if (!endSession) {
-    response.reprompt = { outputSpeech: { type: 'PlainText', text: reprompt ?? 'ほかに何かありますか?' } };
+  if (!close && followup === 'ask') {
+    response.reprompt = { outputSpeech: { type: 'PlainText', text: opts.reprompt ?? 'ほかに何かありますか?' } };
   }
   return { version: '1.0', response };
 }
@@ -180,7 +191,10 @@ export function createAlexaApp(deps: AlexaDeps): Hono {
 
     switch (body.request.type) {
       case 'LaunchRequest':
-        return c.json(speechResponse('はい、何をしましょう?', false, 'ご用件をどうぞ。'));
+        // 起動直後はまだ用件を聞けていないので、ここだけは促す
+        return c.json(
+          speechResponse('はい、何をしましょう?', false, { followup: 'ask', reprompt: 'ご用件をどうぞ。' }),
+        );
 
       case 'SessionEndedRequest':
         sessionConversations.delete(sessionId);
@@ -197,11 +211,12 @@ export function createAlexaApp(deps: AlexaDeps): Hono {
             speechResponse(
               '家電の操作、予定の管理、調べ物などを頼めます。例えば「リビングの電気つけて」のように話してください。',
               false,
+              { followup: 'ask' },
             ),
           );
         }
         if (intentName === 'AMAZON.FallbackIntent') {
-          return c.json(speechResponse('すみません、聞き取れませんでした。もう一度お願いします。', false));
+          return c.json(speechResponse('すみません、聞き取れませんでした。もう一度お願いします。', false, { followup: 'ask' }));
         }
 
         const rawQuery = body.request.intent?.slots?.query?.value?.trim() ?? '';
@@ -211,10 +226,12 @@ export function createAlexaApp(deps: AlexaDeps): Hono {
         }
         // 「えーあいを開いて」のような起動だけの発話はClaudeを呼ばずに即応答する
         if (isLaunch) {
-          return c.json(speechResponse('はい、何をしましょう?', false, 'ご用件をどうぞ。'));
+          return c.json(
+            speechResponse('はい、何をしましょう?', false, { followup: 'ask', reprompt: 'ご用件をどうぞ。' }),
+          );
         }
         if (!query) {
-          return c.json(speechResponse('ご用件をどうぞ。', false));
+          return c.json(speechResponse('ご用件をどうぞ。', false, { followup: 'ask' }));
         }
         return c.json(await handleQuery(deps, sessionId, query));
       }
@@ -260,9 +277,13 @@ async function handleQuery(
         console.error('[alexa] バックグラウンド処理失敗:', err);
         void deps.push.notify(deps.userId, deps.settings, 'failure', 'Aideの処理が失敗しました', '');
       });
-    return speechResponse('確認しています。結果はスマホに通知しますね。', false);
+    return speechResponse('確認しています。結果はスマホに通知しますね。', false, {
+      followup: deps.settings.get('alexa.followup'),
+    });
   }
 
   const verbosity = deps.settings.get('alexa.verbosity');
-  return speechResponse(trimForAlexa(raced.reply, verbosity), false);
+  return speechResponse(trimForAlexa(raced.reply, verbosity), false, {
+    followup: deps.settings.get('alexa.followup'),
+  });
 }

@@ -974,6 +974,11 @@ export function SettingsView() {
           ['detailed', '詳しく'],
           ['full', '全文'],
         ])}
+        {sel('alexa.followup', [
+          ['quiet', '返答後: 聞き返さない (無言ならそのまま終了)'],
+          ['ask', '「ほかに何かありますか?」と聞き返す'],
+          ['off', '返答したら毎回終了する'],
+        ])}
         <label className="field">
           <span>router.default_room (部屋省略時の既定)</span>
           <input

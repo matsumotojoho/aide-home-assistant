@@ -146,3 +146,18 @@ describe('LLM応答パース', () => {
     expect(turn.type).toBe('final');
   });
 });
+
+describe('ツール実行後の往復削減', () => {
+  it('tool_calls に speak があり全部成功したら、その文をそのまま返す (LLM往復を1回省く)', () => {
+    const turn = parseAgentTurn(
+      '{"type":"tool_calls","calls":[{"tool":"home.execute","input":{}}],"speak":"冷房26度でつけました"}',
+    );
+    expect(turn.type).toBe('tool_calls');
+    if (turn.type === 'tool_calls') expect(turn.speak).toBe('冷房26度でつけました');
+  });
+
+  it('speakが無い場合はundefined (結果を見て考え直す経路になる)', () => {
+    const turn = parseAgentTurn('{"type":"tool_calls","calls":[{"tool":"home.get_state","input":{}}]}');
+    if (turn.type === 'tool_calls') expect(turn.speak).toBeUndefined();
+  });
+});

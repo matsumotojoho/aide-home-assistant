@@ -96,3 +96,44 @@ describe('統合タイムライン', () => {
     expect(recent(env).map((r) => r.content)).toEqual(['自分の発話']);
   });
 });
+
+describe('往復削減の実挙動', () => {
+  it('全成功ならspeakを返し、失敗があれば返さない', async () => {
+    const { Orchestrator } = await import('../src/orchestrator.js');
+    const env = makeTestEnv();
+    env.ha.states.set('light.living', { entity_id: 'light.living', state: 'off', attributes: {} });
+
+    let llmCalls = 0;
+    const makeOrchestrator = (script: string[]) =>
+      new Orchestrator({
+        db: env.db,
+        registry: env.registry,
+        providerSelector: {
+          ids: () => [],
+          pick: async () => ({
+            id: 'test',
+            available: async () => true,
+            complete: async () => ({ text: script[llmCalls++] ?? '{"type":"final","speak":"終わり"}', provider: 'test' }),
+          }),
+        },
+        buildToolContext: () => env.ctx,
+      });
+
+    // 成功パターン: LLMは1回しか呼ばれない
+    llmCalls = 0;
+    const ok = await makeOrchestrator([
+      '{"type":"tool_calls","calls":[{"tool":"home.execute","input":{"entity_id":"light.living","service":"turn_on"}}],"speak":"リビングをつけました"}',
+    ]).handleUserMessage({ userId: env.userId, text: '部屋を明るくして', source: 'web' });
+    expect(ok.reply).toBe('リビングをつけました');
+    expect(llmCalls).toBe(1);
+
+    // 失敗パターン: 結果を渡してもう一度考えさせる
+    llmCalls = 0;
+    const ng = await makeOrchestrator([
+      '{"type":"tool_calls","calls":[{"tool":"home.execute","input":{"entity_id":"light.nonexistent","service":"turn_on"}}],"speak":"つけました"}',
+      '{"type":"final","speak":"その機器が見つかりませんでした"}',
+    ]).handleUserMessage({ userId: env.userId, text: '部屋を明るくして', source: 'web' });
+    expect(ng.reply).toBe('その機器が見つかりませんでした');
+    expect(llmCalls).toBe(2);
+  });
+});

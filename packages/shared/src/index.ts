@@ -39,7 +39,17 @@ export interface ToolResult {
 
 /** LLMに要求する応答JSONの形 */
 export type AgentTurn =
-  | { type: 'tool_calls'; calls: ToolCallRequest[]; note?: string }
+  | {
+      type: 'tool_calls';
+      calls: ToolCallRequest[];
+      /**
+       * 全ツールが成功した場合にそのまま返す文。
+       * これがあるとLLMへの往復を1回減らせる (実測で応答が約半分になる)。
+       * 失敗があった場合は使わず、結果を渡して考え直させる。
+       */
+      speak?: string;
+      note?: string;
+    }
   | {
       type: 'final';
       speak: string;
@@ -115,6 +125,13 @@ export interface SettingsMap {
   'ai.local_model': string; // Ollamaモデル名 (Phase 4)
   'ai.claude_cli_model': string; // '' = CLI既定
   'alexa.verbosity': 'short' | 'standard' | 'detailed' | 'full';
+  /**
+   * 返答後のふるまい。
+   * quiet = マイクは開けたままだが聞き返さない (無言ならそのまま終了)
+   * ask   = 「ほかに何かありますか?」と聞き返す
+   * off   = 返答したらセッションを閉じる (毎回「アレクサ」が必要)
+   */
+  'alexa.followup': 'quiet' | 'ask' | 'off';
   'notifications.level': 'all' | 'important' | 'failure' | 'none';
   'memory.retention': 'unlimited' | '30d' | '90d' | '1y' | string; // string = custom days e.g. '180d'
   'learning.enabled': 'on' | 'off';
@@ -134,6 +151,7 @@ export const DEFAULT_SETTINGS: SettingsMap = {
   'ai.local_model': '',
   'ai.claude_cli_model': '',
   'alexa.verbosity': 'standard',
+  'alexa.followup': 'quiet',
   'notifications.level': 'important',
   'memory.retention': 'unlimited',
   'learning.enabled': 'on',

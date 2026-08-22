@@ -318,3 +318,63 @@ describe('会話の終わり方', () => {
     expect((resp.outputSpeech as Record<string, unknown>).text).toContain('また');
   });
 });
+
+describe('返答後の聞き返し (alexa.followup)', () => {
+  function appWith(followup: string) {
+    return createAlexaApp({
+      orchestrator: {
+        handleUserMessage: async () => ({
+          reply: 'リビングの照明をつけました',
+          conversationId: 'c',
+          intent: 'home_direct' as const,
+          pendingApprovalIds: [],
+        }),
+      } as never,
+      settings: { get: (k: string) => (k === 'alexa.followup' ? followup : 'standard') } as never,
+      push: { notify: async () => undefined } as never,
+      userId: 'u1',
+      verify: async () => undefined,
+    });
+  }
+  const ask = (app: ReturnType<typeof appWith>) =>
+    app.request('/', {
+      method: 'POST',
+      body: JSON.stringify(
+        alexaRequest({
+          type: 'IntentRequest',
+          intent: { name: 'CatchAllIntent', slots: { query: { name: 'query', value: 'リビングの電気つけて' } } },
+        }),
+      ),
+      headers: { signaturecertchainurl: 'https://s3.amazonaws.com/echo.api/c', 'signature-256': 'x' },
+    });
+
+  it('既定(quiet)は聞き返さないが、マイクは開けたままにする', async () => {
+    const json = (await (await ask(appWith('quiet'))).json()) as Record<string, unknown>;
+    const resp = json.response as Record<string, unknown>;
+    expect(resp.reprompt).toBeUndefined(); // 「ほかに何かありますか?」と言わない
+    expect(resp.shouldEndSession).toBe(false); // 続けて話しかけられる
+  });
+
+  it('askにすると従来どおり聞き返す', async () => {
+    const json = (await (await ask(appWith('ask'))).json()) as Record<string, unknown>;
+    const resp = json.response as Record<string, unknown>;
+    expect(resp.reprompt).toBeDefined();
+    expect(resp.shouldEndSession).toBe(false);
+  });
+
+  it('offにすると返答のたびにセッションを閉じる', async () => {
+    const json = (await (await ask(appWith('off'))).json()) as Record<string, unknown>;
+    expect((json.response as Record<string, unknown>).shouldEndSession).toBe(true);
+  });
+
+  it('起動直後だけは用件を促す (まだ何も聞けていないため)', async () => {
+    const json = (await (
+      await appWith('quiet').request('/', {
+        method: 'POST',
+        body: JSON.stringify(alexaRequest({ type: 'LaunchRequest' })),
+        headers: { signaturecertchainurl: 'https://s3.amazonaws.com/echo.api/c', 'signature-256': 'x' },
+      })
+    ).json()) as Record<string, unknown>;
+    expect((json.response as Record<string, unknown>).reprompt).toBeDefined();
+  });
+});

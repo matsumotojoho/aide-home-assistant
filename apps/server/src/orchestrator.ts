@@ -15,6 +15,7 @@ import { ProviderUnavailableError } from './llm/index.js';
 import type { ToolRegistry, ToolContext } from './tools/index.js';
 import { answerStatus } from './statusAnswer.js';
 import { answerRecall } from './recallAnswer.js';
+import { buildContextSnapshot } from './statusAnswer.js';
 
 const MAX_TOOL_ITERATIONS = 6;
 
@@ -115,6 +116,7 @@ export class Orchestrator {
           userText: params.text,
           intentKind: intent.kind,
           deviceInfos,
+          userId: params.userId,
         });
         reply = outcome.reply;
         pendingApprovalIds.push(...outcome.pendingApprovalIds);
@@ -164,6 +166,7 @@ export class Orchestrator {
             `これはユーザーが依頼したタスクの継続実行です。新しい仕事は開始しないでください。`,
           intentKind: 'schedule',
           deviceInfos: [],
+          userId: params.userId,
         });
         return { ok: true, summary: outcome.reply };
       } catch (err) {
@@ -191,11 +194,21 @@ export class Orchestrator {
       userText: string;
       intentKind: Intent['kind'];
       deviceInfos: DeviceInfo[];
+      userId: string;
     },
   ): Promise<{ reply: string; pendingApprovalIds: string[] }> {
-    const provider = await this.deps.providerSelector.pick();
+    // Providerの用意と状況取得を同時に進める
+    const [provider, snapshot] = await Promise.all([
+      this.deps.providerSelector.pick(),
+      buildContextSnapshot({
+        db: this.deps.db,
+        userId: params.userId,
+        ha: ctx.ha,
+        location: ctx.settings.get('home.location'),
+      }).catch(() => ''),
+    ]);
     const system = this.buildSystemPrompt();
-    let prompt = this.buildInitialPrompt(ctx, params);
+    let prompt = this.buildInitialPrompt(ctx, params, snapshot);
     const pendingApprovalIds: string[] = [];
 
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
@@ -217,10 +230,18 @@ export class Orchestrator {
 
       // tool_calls の実行
       const results: Array<{ tool: string; result: unknown }> = [];
+      let allOk = true;
       for (const call of turn.calls.slice(0, 8)) {
         const result = await this.deps.registry.execute(call.tool, call.input, ctx);
         if (result.pendingApprovalId) pendingApprovalIds.push(result.pendingApprovalId);
+        if (!result.ok) allOk = false;
         results.push({ tool: call.tool, result });
+      }
+
+      // 全部成功していて返答文も用意されているなら、もう一往復せずに返す。
+      // (LLM 1回あたり8〜10秒かかるため、これで体感が大きく変わる)
+      if (allOk && turn.speak) {
+        return { reply: turn.speak, pendingApprovalIds };
       }
       prompt +=
         `\n\n[あなたのツール呼び出し]\n${JSON.stringify(turn.calls)}\n` +
@@ -236,41 +257,76 @@ export class Orchestrator {
 
   private buildSystemPrompt(): string {
     return [
-      'あなたは「Aide」、ユーザー専用のAI生活アシスタントの判断エンジンです。',
-      '家電・PC・Webサービスを横断してユーザーの目的を実現します。応答は必ず日本語。',
+      'あなたは「Aide」、ユーザー個人の生活アシスタントです。',
+      '家・PC・Webサービスを横断して、ユーザーの目的を実際に達成させます。応答は必ず日本語。',
       '',
       '# 応答形式 (厳守)',
       '必ず次のいずれかのJSONのみを出力する。JSONの前後に説明文を書かない。',
       '1. ツールを使う場合:',
-      '{"type":"tool_calls","calls":[{"tool":"ツール名","input":{...}}]}',
+      '{"type":"tool_calls","calls":[{"tool":"ツール名","input":{...}}],"speak":"完了時の返答"}',
+      '  speak は「全部成功したらこう答える」という文。付けておくと応答が速くなる。',
+      '  結果を見てから考えたい場合だけ省略する (省略すると結果を渡してもう一度聞く)。',
       '2. 完了・返答する場合:',
-      '{"type":"final","speak":"ユーザーへの短い返答","save_memory":[{"kind":"preference","title":"...","content":"..."}]}',
-      'save_memoryは恒常的な好み・重要な決定があった時だけ付ける (単発の指示は保存しない)。',
+      '{"type":"final","speak":"ユーザーへの返答","save_memory":[{"kind":"preference","title":"...","content":"..."}]}',
+      '複数のツールは1回のtool_callsにまとめて並べてよい (往復が減り速くなる)。',
       '',
       '# 利用可能なツール',
       this.deps.registry.promptCatalog(),
       '',
-      '# 行動原則',
-      '- ユーザーから指示された時だけ新しい仕事を始める。予約タスクの継続実行は例外。',
-      '- 設定値が未指定なら、室温・外気温・季節・時刻・過去の好み(memory.search)から適切な値を自分で決める。',
-      '- 時刻指定のある依頼 (「19時に帰るから〜」等) はtasks.createで予約し、reevaluate:trueを付ける。run_atは準備時間を考慮して逆算する (例: 帰宅19時なら18:30頃に冷房開始)。',
-      '- 決済・購入・送金・契約は必ずユーザー承認が必要 (ツールが自動的に承認フローへ回す)。',
-      '- ツール結果が「承認待ち」の場合、finalで「スマホで確認してください」と伝える。',
-      '- 元に戻せない操作はその旨を伝える。',
-      '- 返答(speak)は音声で読まれる可能性があるため簡潔にする。技術的なエラー詳細は言わず、平易に伝える。',
-      '- ユーザーが温度・明るさ等を修正したら、恒常的な好みかを判断してsave_memoryで学習する。',
+      '# 最優先: 聞き返さずに実行する',
+      'このアシスタントは音声でも使われる。聞き返されるとユーザーは手間を感じる。',
+      '- 値が指定されていなくても、状況と好みから自分で決めて実行する。決めた値は返答で伝える。',
+      '  良い例: 「エアコンつけて」→ 室温と外気温から判断し「冷房26度でつけました」',
+      '  悪い例: 「何度にしますか?」と聞き返す',
+      '- 対象が複数あるなら、文脈から最も自然なものを選ぶ。迷ったら人がいる部屋・直前に話題にした部屋を優先し、1つに絞る。',
+      '  全部にやるのは「全部」「家中」と言われたときだけ。',
+      '- 本当に取り返しがつかない場合だけ確認する (誤爆すると困る送信・削除など)。',
+      '  ただし承認が要る操作はツール側が自動で承認フローに回すので、自分で聞き返す必要はない。',
+      '',
+      '# 状況の使い方',
+      '- 冒頭に現在時刻・外気温・天気・家電の現在値が渡される。これで足りるならツールを呼ばない。',
+      '- 足りない場合だけツールを使う。過去の好みは memory.search で引く。',
+      '- 家電を操作するときは渡された entity_id をそのまま使う。',
+      '',
+      '# 学習',
+      'ユーザーが値を直したり好みを述べたら、`save_memory` に kind:"preference" で残す。',
+      '「覚えて」と言われなくてよい。次回から同じ判断ができるように、条件も含めて書く。',
+      '  例: 「ちょっと寒い」と言われて27度にした → title:"夏の寝室の設定温度" content:"27度を好む。26度だと寒いと言われた"',
+      '単発の指示 (今日だけ・今回だけ) は保存しない。',
+      '',
+      '# 予約',
+      '時刻指定のある依頼は tasks.create で予約し reevaluate:true を付ける。',
+      'run_at は準備時間を逆算する (帰宅19時なら18:30に冷房開始)。',
+      '',
+      '# 返答の書き方',
+      '- 音声で読まれる前提。1〜2文で、結果と決めた値を伝える。前置きや復唱はしない。',
+      '- **実際にやったことだけを、漏らさず報告する。** 2台操作したなら2台とも言う。',
+      '  やっていないことを言ったり、やったのに言わなかったりしない。',
+      '- 実行できなかったときは理由を平易に言う。技術的な用語やエラーコードは出さない。',
+      '- 元に戻せない操作をしたときはその旨を添える。',
     ].join('\n');
   }
 
   private buildInitialPrompt(
     ctx: ToolContext,
     params: { conversationId: string | null; userText: string; intentKind: Intent['kind']; deviceInfos: DeviceInfo[] },
+    snapshot = '',
   ): string {
     const { db } = this.deps;
     const parts: string[] = [];
 
-    const nowJst = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', hour12: false });
+    const nowJst = new Date().toLocaleString('ja-JP', {
+      timeZone: 'Asia/Tokyo',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
     parts.push(`現在時刻 (JST): ${nowJst} / 入力元: ${ctx.source}`);
+    if (snapshot) parts.push(`いまの状況:\n${snapshot}`);
 
     // 登録デバイス
     if (params.deviceInfos.length > 0) {
@@ -348,6 +404,7 @@ export function parseAgentTurn(text: string): AgentTurn {
           calls: (obj.calls as Array<Record<string, unknown>>)
             .filter((x) => typeof x.tool === 'string')
             .map((x) => ({ tool: String(x.tool), input: (x.input as Record<string, unknown>) ?? {} })),
+          speak: typeof obj.speak === 'string' ? obj.speak : undefined,
         };
       }
       if (obj.type === 'final' && typeof obj.speak === 'string') {

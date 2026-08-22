@@ -207,3 +207,38 @@ async function readHomeSummary(deps: StatusDeps): Promise<{
   }
   return { onLights, hasLights, climates, lock };
 }
+
+
+/**
+ * Claudeへ最初に渡す状況スナップショット。
+ * これが無いとClaudeは system.get_context を1往復追加で呼ぶことになり、
+ * 実測で応答が数十秒伸びる。先に渡しておく方が速く、判断も安定する。
+ */
+export async function buildContextSnapshot(deps: StatusDeps): Promise<string> {
+  const [weather, states] = await Promise.all([fetchWeather(deps.location), loadStates(deps)]);
+  const byEntity = new Map(states.map((s) => [s.entity_id, s]));
+  const registered = deps.db.select().from(devices).where(eq(devices.userId, deps.userId)).all();
+
+  const lines: string[] = [];
+  if (weather) lines.push(`外: ${weather.temp}度 ${weather.description}`);
+
+  const sensors: string[] = [];
+  const controllable: string[] = [];
+  for (const d of registered) {
+    const st = byEntity.get(d.entityId);
+    if (!st) continue;
+    if (d.type === 'sensor') {
+      sensors.push(`${d.name}=${st.state}`);
+      continue;
+    }
+    const attrs: string[] = [];
+    if (st.attributes?.temperature !== undefined) attrs.push(`設定${st.attributes.temperature}度`);
+    if (st.attributes?.current_temperature !== undefined) attrs.push(`室温${st.attributes.current_temperature}度`);
+    controllable.push(
+      `${d.entityId} (${d.name}${d.room ? `/${d.room}` : ''}) = ${st.state}${attrs.length ? ` ${attrs.join(' ')}` : ''}`,
+    );
+  }
+  if (sensors.length > 0) lines.push(`センサー: ${sensors.join(', ')}`);
+  if (controllable.length > 0) lines.push(`家電の現在値:\n${controllable.map((c) => `  ${c}`).join('\n')}`);
+  return lines.join('\n');
+}
