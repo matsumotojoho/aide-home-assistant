@@ -182,3 +182,69 @@ describe('Alexa応答長 (alexa.verbosity)', () => {
     expect(trimForAlexa(veryLong, 'short')).toContain('…');
   });
 });
+
+describe('呼び出し名が混ざった発話の正規化 (実機で発覚)', () => {
+  it('呼び出し名+助詞を取り除く', async () => {
+    const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
+    expect(normalizeAlexaQuery('えーあいでリビングの電気つけて')).toEqual({
+      query: 'リビングの電気つけて',
+      isLaunch: false,
+    });
+    expect(normalizeAlexaQuery('エーアイに寝室のエアコン26度にして')).toEqual({
+      query: '寝室のエアコン26度にして',
+      isLaunch: false,
+    });
+  });
+
+  it('起動だけの発話はisLaunchになる (Claudeを呼ばない)', async () => {
+    const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
+    for (const phrase of ['えーあいを開いて', 'えーあい', 'エーアイを起動して', 'えーあいひらいて']) {
+      expect(normalizeAlexaQuery(phrase).isLaunch, phrase).toBe(true);
+    }
+  });
+
+  it('呼び出し名が無い発話はそのまま通す', async () => {
+    const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
+    expect(normalizeAlexaQuery('リビングの電気つけて')).toEqual({
+      query: 'リビングの電気つけて',
+      isLaunch: false,
+    });
+  });
+
+  it('デバイス名に呼び出し名が紛れても本文を壊さない', async () => {
+    const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
+    // 先頭以外の一致は削らない
+    expect(normalizeAlexaQuery('今日のえーあいの調子はどう').query).toBe('今日のえーあいの調子はどう');
+  });
+
+  it('起動だけの発話にはClaudeを使わず即答する', async () => {
+    let called = 0;
+    const app = createAlexaApp({
+      orchestrator: {
+        handleUserMessage: async () => {
+          called++;
+          return { reply: 'x', conversationId: 'c', intent: 'consult' as const, pendingApprovalIds: [] };
+        },
+      } as never,
+      settings: { get: () => 'standard' } as never,
+      push: { notify: async () => undefined } as never,
+      userId: 'u1',
+      verify: async () => undefined,
+    });
+    const res = await app.request('/', {
+      method: 'POST',
+      body: JSON.stringify(
+        alexaRequest({
+          type: 'IntentRequest',
+          intent: { name: 'CatchAllIntent', slots: { query: { name: 'query', value: 'えーあいを開いて' } } },
+        }),
+      ),
+      headers: { signaturecertchainurl: 'https://s3.amazonaws.com/echo.api/c', 'signature-256': 'x' },
+    });
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(called).toBe(0); // Claudeを呼んでいない
+    expect((json.response as Record<string, unknown>).outputSpeech).toMatchObject({
+      text: expect.stringContaining('何をしましょう'),
+    });
+  });
+});

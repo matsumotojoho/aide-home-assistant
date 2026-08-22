@@ -55,6 +55,30 @@ function defaultVerify(certUrl: string, signature: string, body: string): Promis
   });
 }
 
+
+// Alexaは呼び出し名を含んだ発話をそのままスロットに入れてくることがある。
+// 例: 「えーあいでリビングの電気つけて」→ query="えーあいでリビングの電気つけて"
+// このままRouterへ渡すと部屋やデバイスの判定を邪魔するため、前置きを取り除く。
+const INVOCATION_ALIASES = ['えーあい', 'エーアイ', 'ええあい', 'えあい', 'AI', 'ai'];
+// 呼び出し名の直後に来る助詞
+const PARTICLE_RE = /^(で|に|を|の|、|,|\s)+/;
+// 「開いて」等しか残らなければ、それは起動要求であって用件ではない
+const LAUNCH_ONLY_RE = /^(を|に)?(開いて|ひらいて|開けて|起動して|つないで|呼んで|スタート|start)$/i;
+
+export function normalizeAlexaQuery(raw: string): { query: string; isLaunch: boolean } {
+  let text = raw.normalize('NFKC').trim();
+  for (const alias of INVOCATION_ALIASES) {
+    if (text.startsWith(alias)) {
+      text = text.slice(alias.length).replace(PARTICLE_RE, '').trim();
+      break;
+    }
+  }
+  if (text === '' || LAUNCH_ONLY_RE.test(text)) {
+    return { query: '', isLaunch: true };
+  }
+  return { query: text, isLaunch: false };
+}
+
 /** Alexa応答長設定に従って読み上げ文を整形する */
 export function trimForAlexa(text: string, verbosity: 'short' | 'standard' | 'detailed' | 'full'): string {
   const clean = text.replace(/\s+/g, ' ').trim();
@@ -152,7 +176,12 @@ export function createAlexaApp(deps: AlexaDeps): Hono {
           return c.json(speechResponse('すみません、聞き取れませんでした。もう一度お願いします。', false));
         }
 
-        const query = body.request.intent?.slots?.query?.value?.trim() ?? '';
+        const rawQuery = body.request.intent?.slots?.query?.value?.trim() ?? '';
+        const { query, isLaunch } = normalizeAlexaQuery(rawQuery);
+        // 「えーあいを開いて」のような起動だけの発話はClaudeを呼ばずに即応答する
+        if (isLaunch) {
+          return c.json(speechResponse('はい、何をしましょう?', false, 'ご用件をどうぞ。'));
+        }
         if (!query) {
           return c.json(speechResponse('ご用件をどうぞ。', false));
         }
