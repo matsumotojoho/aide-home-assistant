@@ -95,12 +95,32 @@ function findByAlias(text: string, devices: DeviceInfo[]): DeviceInfo[] {
   return hits;
 }
 
+// 「〜して」のような操作指示。状態確認と区別するために使う
+const COMMAND_RE = /(つけて|付けて|点けて|消して|けして|切って|オンに|オフに|にして|して|開けて|閉めて|変えて|下げて|上げて|お願い|しといて|しておいて)/;
+// 状態を聞かれているだけのパターン (Claude不要で即答する)
+const WEATHER_RE = /(天気|気温|外.*(何度|温度)|雨.*(降|ふ))/;
+const INDOOR_RE = /(室温|湿度|部屋.*(何度|温度)|今何度|何度ある|暑い\?|寒い\?)/;
+const HOME_STATUS_RE = /(家.*(状況|状態|どう)|今.*状況|状況(を)?教え|状態(を)?教え|全部.*(ついて|消えて)|ついてる\?|消えてる\?|閉まってる|開いてる)/;
+const TIME_RE = /^(今)?何時|今の時間|時間(を)?教え/;
+// 未来・過去の話は現在値では答えられない
+const FORECAST_RE = /(明日|あした|明後日|あさって|今週|来週|週末|今夜|今晩|夕方|午後|午前|これから|さっき|昨日|きのう|予報)/;
+
 export function classify(rawText: string, devices: DeviceInfo[], defaultRoom = ''): Intent {
   const text = norm(rawText);
   if (!text) return { kind: 'consult' };
 
   const hasHomeContext = HOME_CONTEXT_RE.test(text);
   const hasSchedule = SCHEDULE_RE.test(text);
+
+  // 状態確認 (操作指示でも予約でもないもの) はClaudeを経由せず即答する。
+  // Alexaは8秒で打ち切られるため、頻出の問い合わせをここで捌くことが体感を大きく変える。
+  // ただし「明日の天気」のような予報はここでは答えられない (現在値しか持たない) のでClaudeへ回す。
+  if (!hasSchedule && !COMMAND_RE.test(text) && !FORECAST_RE.test(text)) {
+    if (TIME_RE.test(text)) return { kind: 'status', topic: 'time' };
+    if (WEATHER_RE.test(text)) return { kind: 'status', topic: 'weather' };
+    if (INDOOR_RE.test(text)) return { kind: 'status', topic: 'indoor' };
+    if (HOME_STATUS_RE.test(text)) return { kind: 'status', topic: 'home' };
+  }
 
   // 時間指定を含む依頼はタスク化が必要 → Claude
   if (hasSchedule && (hasHomeContext || /快適|いい感じ/.test(text))) {

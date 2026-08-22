@@ -16,6 +16,8 @@ export type Intent =
       description: string;
     }
   | { kind: 'home_ambiguous' }
+  /** 天気・室温・家の状態など、Claudeを使わず即答できる問い合わせ */
+  | { kind: 'status'; topic: 'weather' | 'indoor' | 'home' | 'time' }
   | { kind: 'schedule' }
   | { kind: 'mac' }
   | { kind: 'consult' };

@@ -13,6 +13,7 @@ import { classify, type DeviceInfo } from './router/classifier.js';
 import type { ProviderSelector } from './llm/index.js';
 import { ProviderUnavailableError } from './llm/index.js';
 import type { ToolRegistry, ToolContext } from './tools/index.js';
+import { answerStatus } from './statusAnswer.js';
 
 const MAX_TOOL_ITERATIONS = 6;
 
@@ -88,6 +89,20 @@ export class Orchestrator {
         ctx,
       );
       reply = result.ok ? intent.speak : `すみません、${result.error ?? '実行できませんでした'}`;
+    } else if (intent.kind === 'status') {
+      // 天気・室温・家の状態はClaudeを使わず即答する。
+      // Claude CLIは9〜12秒かかりAlexaの8秒制限に収まらないため、頻出の問い合わせをここで捌く。
+      try {
+        reply = await answerStatus(intent.topic, {
+          db,
+          userId: params.userId,
+          ha: ctx.ha,
+          location: ctx.settings.get('home.location'),
+        });
+      } catch (err) {
+        console.error('[orchestrator] status失敗:', err);
+        reply = 'すみません、状態を取得できませんでした。';
+      }
     } else {
       // B〜E. Claudeによる判断
       try {

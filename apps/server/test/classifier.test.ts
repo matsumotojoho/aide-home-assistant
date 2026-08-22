@@ -149,3 +149,45 @@ describe('Router classifier', () => {
     expect(classify('', TEST_DEVICES).kind).toBe('consult');
   });
 });
+
+describe('状態確認の高速パス (Alexaの8秒制限対策)', () => {
+  it('天気・室温・時刻の問い合わせは status になる', () => {
+    for (const [text, topic] of [
+      ['天気を教えて', 'weather'],
+      ['今の気温は', 'weather'],
+      ['室温は', 'indoor'],
+      ['今何度', 'indoor'],
+      ['湿度どれくらい', 'indoor'],
+      ['今何時', 'time'],
+      ['家の状況を教えて', 'home'],
+    ] as const) {
+      const intent = classify(text, TEST_DEVICES);
+      expect(intent.kind, text).toBe('status');
+      if (intent.kind === 'status') expect(intent.topic, text).toBe(topic);
+    }
+  });
+
+  it('操作指示は status に取られない', () => {
+    // 「26度にして」は状態確認ではなく操作
+    expect(classify('エアコン26度にして', TEST_DEVICES).kind).toBe('home_direct');
+    expect(classify('ちょっと暗くして', TEST_DEVICES).kind).toBe('home_ambiguous');
+    expect(classify('寝室の電気つけて', TEST_DEVICES).kind).toBe('home_direct');
+  });
+
+  it('時間指定のある依頼は status でなく schedule のまま', () => {
+    expect(classify('今日19時に帰るから快適にしといて', TEST_DEVICES).kind).toBe('schedule');
+  });
+
+  it('一般的な相談は consult のまま', () => {
+    expect(classify('この前調べたやつ何だっけ', TEST_DEVICES).kind).toBe('consult');
+  });
+
+  it('予報 (明日の天気など) は現在値で答えられないのでClaudeへ回す', () => {
+    // 現在の天気しか持っていないため、未来の話を高速パスで答えてはいけない
+    for (const text of ['明日の天気どう?', '今夜は雨降る?', '週末の天気教えて', '午後の気温は']) {
+      expect(classify(text, TEST_DEVICES).kind, text).not.toBe('status');
+    }
+    // 現在の天気は高速パスのまま
+    expect(classify('今の天気は', TEST_DEVICES).kind).toBe('status');
+  });
+});

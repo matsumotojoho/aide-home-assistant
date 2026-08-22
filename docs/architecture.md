@@ -48,6 +48,9 @@ Alexa (Phase 2)     スマホPWA        PC Web
 
 ### Router (`src/router/classifier.ts`)
 純関数のルールベース分類器。判定順:
+- **status**: 天気・室温・湿度・時刻・家の状態の問い合わせ → Claudeを使わず即答 (0.3〜1秒)
+  Claude CLIはプロセス起動を伴い9〜12秒かかりAlexaの8秒制限に収まらないため、
+  頻出の問い合わせはここで捌く。ただし「明日の天気」等の予報は現在値で答えられないのでClaudeへ回す
 - **schedule**: 時刻表現+家電/快適文脈 → Claudeがtasks.createで予約
 - **mac**: PC操作語彙 (家電文脈なし)
 - **home_direct**: デバイス・操作が一意に決まるON/OFF/温度指定 → 即実行
