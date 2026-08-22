@@ -83,7 +83,7 @@ describe('予約タスク', () => {
 
     const rows = env.db.select().from(tasks).all();
     expect(rows[0].status).toBe('done');
-    expect(env.ha.calls.some((c) => c.data.entity_id === 'light.living')).toBe(true);
+    expect(env.ha.calls.some((c) => String(c.data.entity_id).includes('light.living'))).toBe(true);
     expect(env.notifications.some((n) => n.title.includes('予約タスク完了'))).toBe(true);
   });
 

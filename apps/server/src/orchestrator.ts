@@ -84,7 +84,7 @@ export class Orchestrator {
       // A. 明確な家電命令 → Claude不使用・即実行 (Claude停止時も動作)
       const result = await this.deps.registry.execute(
         'home.execute',
-        { entity_id: intent.entityId, domain: intent.domain, service: intent.service, data: intent.data },
+        { entity_id: intent.entityIds, domain: intent.domain, service: intent.service, data: intent.data },
         ctx,
       );
       reply = result.ok ? intent.speak : `すみません、${result.error ?? '実行できませんでした'}`;

@@ -7,7 +7,7 @@ describe('Router classifier', () => {
     const intent = classify('寝室の電気つけて', TEST_DEVICES);
     expect(intent.kind).toBe('home_direct');
     if (intent.kind === 'home_direct') {
-      expect(intent.entityId).toBe('light.bedroom');
+      expect(intent.entityIds).toEqual(['light.bedroom']);
       expect(intent.service).toBe('turn_on');
     }
   });
@@ -41,7 +41,7 @@ describe('Router classifier', () => {
   it('エイリアス指定 (テレビつけて) は home_direct', () => {
     const intent = classify('テレビつけて', TEST_DEVICES);
     expect(intent.kind).toBe('home_direct');
-    if (intent.kind === 'home_direct') expect(intent.entityId).toBe('media_player.living_tv');
+    if (intent.kind === 'home_direct') expect(intent.entityIds).toEqual(['media_player.living_tv']);
   });
 
   it('温度指定 (エアコン26度) は climate.set_temperature', () => {
@@ -69,10 +69,66 @@ describe('Router classifier', () => {
     expect(classify('電気つけて', TEST_DEVICES).kind).toBe('home_ambiguous');
   });
 
+  it('部屋指定は汎用エイリアスより優先される (別部屋の機器を誤操作しない)', () => {
+    // 実環境で発生: 寝室の機器に「電気」という汎用エイリアスが付いていると
+    // 「リビングの電気消して」が寝室の電気を消してしまった
+    const devs = [
+      { entityId: 'light.bedroom', name: '寝室の電気', room: '寝室', type: 'light', aliases: ['電気', '照明'] },
+      { entityId: 'light.living1', name: 'リビング1', room: 'リビング', type: 'light', aliases: [] },
+      { entityId: 'light.living2', name: 'リビング2', room: 'リビング', type: 'light', aliases: [] },
+    ];
+    const intent = classify('リビングの電気消して', devs);
+    expect(intent.kind).toBe('home_direct');
+    if (intent.kind === 'home_direct') {
+      expect(intent.entityIds).toEqual(['light.living1', 'light.living2']);
+      expect(intent.entityIds).not.toContain('light.bedroom');
+    }
+  });
+
+  it('同じ部屋の同種デバイスはまとめて1回で操作する (リビング4灯)', () => {
+    // 実環境: リビングにTRÅDFRIの電球が4つある
+    const livingLights = [
+      { entityId: 'light.living1', name: 'リビング1', room: 'リビング', type: 'light', aliases: [] },
+      { entityId: 'light.living2', name: 'リビング2', room: 'リビング', type: 'light', aliases: [] },
+      { entityId: 'light.living3', name: 'リビング3', room: 'リビング', type: 'light', aliases: [] },
+      { entityId: 'light.living4', name: 'リビング4', room: 'リビング', type: 'light', aliases: [] },
+    ];
+    const intent = classify('リビングの電気つけて', livingLights);
+    expect(intent.kind).toBe('home_direct'); // Claudeを経由せず即実行できる
+    if (intent.kind === 'home_direct') {
+      expect(intent.entityIds).toHaveLength(4);
+      expect(intent.service).toBe('turn_on');
+      // 応答は1台ずつ読み上げずまとめて呼ぶ
+      expect(intent.speak).toBe('リビングの照明をつけました');
+    }
+  });
+
+  it('まとめ操作は同じ部屋のものだけを対象にする', () => {
+    const mixed = [
+      { entityId: 'light.living1', name: 'リビング1', room: 'リビング', type: 'light', aliases: [] },
+      { entityId: 'light.living2', name: 'リビング2', room: 'リビング', type: 'light', aliases: [] },
+      { entityId: 'light.bedroom', name: '寝室の電気', room: '寝室', type: 'light', aliases: [] },
+    ];
+    const intent = classify('リビングの電気消して', mixed);
+    expect(intent.kind).toBe('home_direct');
+    if (intent.kind === 'home_direct') {
+      expect(intent.entityIds).toEqual(['light.living1', 'light.living2']);
+    }
+  });
+
+  it('HAドメインが混在する場合はまとめず Claude に回す', () => {
+    // 赤外線(switch.*)とZigbee(light.*)が同じ部屋に混在するケース
+    const mixedDomains = [
+      { entityId: 'light.living1', name: 'リビング1', room: 'リビング', type: 'light', aliases: [] },
+      { entityId: 'switch.living_ir', name: 'リビング2', room: 'リビング', type: 'light', aliases: [] },
+    ];
+    expect(classify('リビングの電気つけて', mixedDomains).kind).toBe('home_ambiguous');
+  });
+
   it('部屋未指定でも default_room 設定で一意になれば home_direct', () => {
     const intent = classify('電気つけて', TEST_DEVICES, 'リビング');
     expect(intent.kind).toBe('home_direct');
-    if (intent.kind === 'home_direct') expect(intent.entityId).toBe('light.living');
+    if (intent.kind === 'home_direct') expect(intent.entityIds).toEqual(['light.living']);
   });
 
   it('時間指定を含む依頼は schedule', () => {

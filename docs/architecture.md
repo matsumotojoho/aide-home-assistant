@@ -56,6 +56,14 @@ Alexa (Phase 2)     スマホPWA        PC Web
 
 デバイス解決は `devices` テーブル (entity_id / 日本語名 / 部屋 / 種別 / エイリアス) を使用。部屋省略時は `router.default_room` 設定で補完。
 
+重要な制約 (実機検証で判明):
+- **HAのドメインは種別ではなく entity_id から決める。** 赤外線リモコン経由の照明は種別=light でも entity_id は `switch.*`。`light.turn_on` を `switch.*` へ投げるとHAは200を返しつつ何も実行しない
+- **部屋の指定はエイリアスより優先。** 汎用エイリアス (「電気」等) を特定デバイスに付けると、別部屋の指示がそれに吸われる
+- **同じ部屋・同じドメインの複数台はまとめて1回で操作する** (例: リビングの照明4灯)。部屋が特定できない場合はまとめずClaudeへ回す
+- **無言の失敗を検出する。** HAは対象がオフラインでも200を返すため、応答配列に対象が含まれるかを確認し、含まれなければ状態を取り直して判定する
+
+実測レイテンシ: TRÅDFRI (LAN内) 約90ms / SwitchBot (クラウドAPI) 約5秒。SwitchBotはクラウド往復が必須のため1〜2秒目標を満たせない。ローカル制御にはBLEが必要だが、colimaはVM経由でBluetoothを扱えない (HAOSを別筐体へ移せば解決)。
+
 ### LLM Provider abstraction (`src/llm/`)
 `LlmProvider` インターフェース (`available()` / `complete()`) の実装:
 

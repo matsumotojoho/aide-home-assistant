@@ -55,6 +55,23 @@ function domainOf(entityId: string): string {
   return entityId.split('.')[0];
 }
 
+/**
+ * 応答での呼び名。1台ならその名前、複数台なら「リビングの照明」とまとめて呼ぶ
+ * (「リビング1をつけました」を4回言われても意味がないため)。
+ */
+const TYPE_LABEL: Record<string, string> = {
+  light: '照明',
+  climate: 'エアコン',
+  tv: 'テレビ',
+  switch: 'スイッチ',
+};
+
+function groupLabel(candidates: DeviceInfo[], room: string | null): string {
+  if (candidates.length === 1) return candidates[0].name;
+  const type = TYPE_LABEL[candidates[0].type] ?? '機器';
+  return room ? `${room}の${type}` : type;
+}
+
 function findRoom(text: string, devices: DeviceInfo[]): string | null {
   const rooms = [...new Set(devices.map((d) => d.room).filter((r): r is string => Boolean(r)))];
   // 長い部屋名を優先してマッチ (「寝室2」と「寝室」の混在対策)
@@ -106,34 +123,46 @@ export function classify(rawText: string, devices: DeviceInfo[], defaultRoom = '
     const room = findRoom(text, devices);
     const typeHit = TYPE_KEYWORDS.find((t) => t.re.test(text));
 
+    // 部屋が明示されていれば必ずその部屋に絞る。
+    // (「リビングの電気」が、汎用エイリアス「電気」を持つ寝室の機器に当たる事故を防ぐ。
+    //  絞った結果0件なら、エイリアス一致は部屋違いだったので種別から取り直す)
+    if (room && candidates.length > 0) {
+      candidates = candidates.filter((d) => d.room === room);
+    }
+
     if (candidates.length === 0 && typeHit) {
       candidates = devices.filter((d) => d.type === typeHit.type);
       if (room) candidates = candidates.filter((d) => d.room === room);
       else if (candidates.length > 1 && defaultRoom) {
         const inDefault = candidates.filter((d) => d.room === defaultRoom);
-        if (inDefault.length === 1) candidates = inDefault;
+        if (inDefault.length > 0) candidates = inDefault;
       }
-    } else if (candidates.length > 1 && room) {
-      candidates = candidates.filter((d) => d.room === room);
     }
+
+    // 複数台をまとめて操作してよいのは「部屋が特定でき、全候補が同じ部屋」のときだけ。
+    // (「電気つけて」で家中の照明が点く事故を防ぐ)
+    const candidateRooms = new Set(candidates.map((c) => c.room));
+    const groupable = candidates.length === 1 || (room !== null && candidateRooms.size === 1);
+    if (!groupable) return { kind: 'home_ambiguous' };
 
     // 温度指定 (エアコン26度 など)
     const tempMatch = text.match(TEMP_RE);
-    if (tempMatch && candidates.length === 1 && candidates[0].type === 'climate') {
+    if (tempMatch && candidates.length > 0 && candidates.every((c) => c.type === 'climate')) {
       const temp = Number(tempMatch[1]);
       if (temp >= 16 && temp <= 32) {
         const modeMatch = text.match(MODE_RE);
         const hvacMode = modeMatch ? { 冷房: 'cool', 暖房: 'heat', 除湿: 'dry' }[modeMatch[1]] : undefined;
-        const data: Record<string, unknown> = { entity_id: candidates[0].entityId, temperature: temp };
+        const data: Record<string, unknown> = { temperature: temp };
         if (hvacMode) data.hvac_mode = hvacMode;
+        const label = groupLabel(candidates, room);
         return {
           kind: 'home_direct',
-          entityId: candidates[0].entityId,
+          entityIds: candidates.map((c) => c.entityId),
           domain: 'climate',
           service: 'set_temperature',
           data,
-          speak: `${candidates[0].name}を${temp}度にしました`,
-          description: `${candidates[0].name} → ${temp}℃${modeMatch ? ` (${modeMatch[1]})` : ''}`,
+          speak: `${label}を${temp}度にしました`,
+          description: `${label} → ${temp}℃${modeMatch ? ` (${modeMatch[1]})` : ''}`,
         };
       }
     }
@@ -141,18 +170,21 @@ export function classify(rawText: string, devices: DeviceInfo[], defaultRoom = '
     // ON/OFF
     const isOn = ON_RE.test(text);
     const isOff = OFF_RE.test(text);
-    if ((isOn || isOff) && !(isOn && isOff) && candidates.length === 1) {
-      const d = candidates[0];
-      const svc = SERVICE_BY_TYPE[d.type];
-      if (svc) {
+    if ((isOn || isOff) && !(isOn && isOff) && candidates.length > 0) {
+      // まとめて操作するには、HAのドメインとサービス名が全候補で一致している必要がある
+      const domains = new Set(candidates.map((c) => domainOf(c.entityId)));
+      const svcs = candidates.map((c) => SERVICE_BY_TYPE[c.type]);
+      if (domains.size === 1 && svcs.every((v) => v)) {
+        const svc = svcs[0]!;
+        const label = groupLabel(candidates, room);
         return {
           kind: 'home_direct',
-          entityId: d.entityId,
-          domain: domainOf(d.entityId),
+          entityIds: candidates.map((c) => c.entityId),
+          domain: [...domains][0],
           service: isOn ? svc.on : svc.off,
-          data: { entity_id: d.entityId },
-          speak: isOn ? `${d.name}をつけました` : `${d.name}を消しました`,
-          description: `${d.name} → ${isOn ? 'ON' : 'OFF'}`,
+          data: {},
+          speak: isOn ? `${label}をつけました` : `${label}を消しました`,
+          description: `${label} → ${isOn ? 'ON' : 'OFF'}`,
         };
       }
     }

@@ -43,50 +43,63 @@ export const homeExecute: ToolDef = {
   name: 'home.execute',
   description: '家電を操作する (Home Assistantのサービス呼び出し)。実行前状態を保存しUndo可能。',
   inputSchema: z.object({
-    entity_id: z.string().min(1),
+    entity_id: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]),
     domain: z.string().optional(),
     service: z.string().min(1),
     data: z.record(z.unknown()).optional(),
   }),
   inputDoc:
-    '{"entity_id":"light.bedroom","service":"turn_on","data"?:{"brightness_pct":40}} domainは省略時entity_idから推定',
+    '{"entity_id":"light.bedroom","service":"turn_on","data"?:{"brightness_pct":40}} ' +
+    'entity_idは配列も可 (例: 部屋の照明をまとめて操作)。domainはentity_idから自動決定',
   async execute(ctx, input) {
     if (!ctx.ha.configured()) {
       return { ok: false, error: 'Home Assistantが未接続です' };
     }
-    const entityId = String(input.entity_id);
+    const entityIds = Array.isArray(input.entity_id)
+      ? (input.entity_id as string[])
+      : [String(input.entity_id)];
     // ドメインは必ず entity_id から決める。呼び出し側が別ドメインを指定しても従わない。
     // (例: light.turn_off を switch.* に対して呼ぶと、HAは200を返しつつ何もしない)
-    const domain = entityId.split('.')[0];
+    const domains = new Set(entityIds.map((id) => id.split('.')[0]));
+    if (domains.size > 1) {
+      return { ok: false, error: `種類の違う機器はまとめて操作できません (${[...domains].join(', ')})` };
+    }
+    const domain = [...domains][0];
     const requestedDomain = input.domain as string | undefined;
     if (requestedDomain && requestedDomain !== domain) {
-      console.warn(`[home.execute] domain=${requestedDomain} は ${entityId} と不一致のため ${domain} で実行します`);
+      console.warn(`[home.execute] domain=${requestedDomain} は ${entityIds[0]} と不一致のため ${domain} で実行します`);
     }
     const service = String(input.service);
-    const data = { entity_id: entityId, ...((input.data as Record<string, unknown>) ?? {}) };
+    const data: Record<string, unknown> = {
+      entity_id: entityIds,
+      ...((input.data as Record<string, unknown>) ?? {}),
+    };
 
     // Undo用に実行前状態を取得。あわせて実行可否を確認する。
     // HAは対象が unavailable でもサービス呼び出しに200を返し、実際には何もしない
     // (ログに warning が出るだけ)。そのまま成功扱いにすると「つけました」と言って
     // 実際は何も起きていない、という最悪の誤報告になるため事前に弾く。
-    const before = await ctx.ha.getState(entityId);
-    if (!before) {
-      return { ok: false, error: 'その機器が見つかりませんでした', target: entityId };
-    }
-    if (before.state === 'unavailable') {
+    const beforeStates = await Promise.all(entityIds.map((id) => ctx.ha.getState(id)));
+    const usable = entityIds.filter((_, i) => beforeStates[i] && beforeStates[i]!.state !== 'unavailable');
+    if (usable.length === 0) {
+      const missing = beforeStates.every((b) => !b);
       return {
         ok: false,
-        error: '機器がオフラインのため操作できませんでした。電源とネットワークを確認してください',
-        target: entityId,
+        error: missing
+          ? 'その機器が見つかりませんでした'
+          : '機器がオフラインのため操作できませんでした。電源とネットワークを確認してください',
+        target: entityIds.join(','),
       };
     }
+    // 一部だけオフラインなら、使える機器だけを対象にする
+    data.entity_id = usable;
 
     // SwitchBot Cloud等の一部統合は set_temperature に同梱した hvac_mode を無視するため、
     // モード変更を伴う場合は set_hvac_mode を先に単独で呼ぶ。
     // (AI側は「冷房26℃にして」を1回の呼び出しで表現できるままにする)
     if (domain === 'climate' && service === 'set_temperature' && data.hvac_mode) {
       await ctx.ha.callService('climate', 'set_hvac_mode', {
-        entity_id: entityId,
+        entity_id: usable,
         hvac_mode: data.hvac_mode,
       });
     }
@@ -95,35 +108,35 @@ export const homeExecute: ToolDef = {
     // HAはサービス呼び出しで変化した状態の配列を返す。対象が含まれていれば確実に届いている。
     // 含まれない場合は「元々その状態だった(冪等)」か「オフラインで飛ばされた」かの
     // どちらかなので、状態を取り直して判別する。
-    if (!responseIncludes(response, entityId)) {
-      const after = await ctx.ha.getState(entityId);
-      if (!after || after.state === 'unavailable') {
+    if (!usable.some((id) => responseIncludes(response, id))) {
+      const after = await Promise.all(usable.map((id) => ctx.ha.getState(id)));
+      if (after.every((a) => !a || a.state === 'unavailable')) {
         return {
           ok: false,
           error: '機器がオフラインのため操作できませんでした。電源とネットワークを確認してください',
-          target: entityId,
+          target: usable.join(','),
         };
       }
     }
 
-    const undo = before
-      ? {
-          kind: 'home_state',
-          restore: {
-            entity_id: entityId,
-            domain,
-            state: before.state,
-            attributes: pickForUndo(domain, before.attributes),
-          },
-        }
-      : undefined;
+    // Undoは対象ごとに実行前状態を保持する (まとめ操作でも1台ずつ元に戻せるように)
+    const restores = entityIds
+      .map((id, i) => ({ id, before: beforeStates[i] }))
+      .filter((x) => x.before && usable.includes(x.id))
+      .map((x) => ({
+        entity_id: x.id,
+        domain,
+        state: x.before!.state,
+        attributes: pickForUndo(domain, x.before!.attributes),
+      }));
 
+    const label = usable.length === 1 ? usable[0] : `${usable.length}台`;
     return {
       ok: true,
-      data: { executed: `${domain}.${service}`, entity_id: entityId },
-      summary: `${entityId} → ${domain}.${service}`,
-      target: entityId,
-      undo,
+      data: { executed: `${domain}.${service}`, entity_id: usable },
+      summary: `${label} → ${domain}.${service}`,
+      target: usable.join(','),
+      undo: restores.length > 0 ? { kind: 'home_state', restore: { targets: restores } } : undefined,
     };
   },
 };

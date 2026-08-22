@@ -58,7 +58,7 @@ describe('Claude障害フォールバック', () => {
     expect(result.intent).toBe('home_direct');
     expect(result.reply).toContain('つけました');
     expect(env.ha.calls).toHaveLength(1);
-    expect(env.ha.calls[0].data.entity_id).toBe('light.bedroom');
+    expect(env.ha.calls[0].data.entity_id).toEqual(['light.bedroom']);
   });
 
   it('曖昧な命令はAI不通メッセージを返す (エラーで落ちない)', async () => {

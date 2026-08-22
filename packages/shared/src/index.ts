@@ -7,7 +7,8 @@
 export type Intent =
   | {
       kind: 'home_direct';
-      entityId: string;
+      /** 同一部屋の同種デバイスをまとめて操作するため配列で持つ (例: リビングの照明4灯) */
+      entityIds: string[];
       domain: string;
       service: string;
       data?: Record<string, unknown>;
