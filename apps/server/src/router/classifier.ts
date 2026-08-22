@@ -102,6 +102,9 @@ const WEATHER_RE = /(天気|気温|外.*(何度|温度)|雨.*(降|ふ))/;
 const INDOOR_RE = /(室温|湿度|部屋.*(何度|温度)|今何度|何度ある|暑い\?|寒い\?)/;
 const HOME_STATUS_RE = /(家.*(状況|状態|どう)|今.*状況|状況(を)?教え|状態(を)?教え|全部.*(ついて|消えて)|ついてる\?|消えてる\?|閉まってる|開いてる)/;
 const TIME_RE = /^(今)?何時|今の時間|時間(を)?教え/;
+// 直前の回答の読み上げ直し
+const RECALL_RE =
+  /(さっき|先ほど|さきほど)の?(回答|答え|返事|話|やつ|結果)|もう(一回|1回|いちど|一度)(言って|教えて)|なんて(言った|言ってた)|繰り返して|リピート/;
 // 未来・過去の話は現在値では答えられない
 const FORECAST_RE = /(明日|あした|明後日|あさって|今週|来週|週末|今夜|今晩|夕方|午後|午前|これから|さっき|昨日|きのう|予報)/;
 
@@ -111,6 +114,10 @@ export function classify(rawText: string, devices: DeviceInfo[], defaultRoom = '
 
   const hasHomeContext = HOME_CONTEXT_RE.test(text);
   const hasSchedule = SCHEDULE_RE.test(text);
+
+  // 「さっきの回答教えて」— 保存済みの直前の回答を読み上げ直すだけなのでClaude不要。
+  // Alexaが8秒で打ち切ってスマホ通知に回った後、口頭で聞き直せるようにするための経路。
+  if (RECALL_RE.test(text)) return { kind: 'recall' };
 
   // 状態確認 (操作指示でも予約でもないもの) はClaudeを経由せず即答する。
   // Alexaは8秒で打ち切られるため、頻出の問い合わせをここで捌くことが体感を大きく変える。

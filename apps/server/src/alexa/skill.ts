@@ -19,6 +19,13 @@ export interface AlexaDeps {
   settings: SettingsService;
   push: PushService;
   userId: string;
+  /**
+   * 直近のAlexa会話IDを返す。Alexaのセッションは無応答8秒程度で切れてしまい、
+   * 話しかけ直すと別sessionIdになる。そのたびに会話が途切れると
+   * 「さっきの回答教えて」「寝室もお願い」が成立しないため、
+   * 一定時間内なら同じ会話を続ける。
+   */
+  findRecentConversation?: () => string | undefined;
   /** テスト用: 署名検証の差し替え */
   verify?: (certUrl: string, signature: string, body: string) => Promise<void>;
 }
@@ -202,13 +209,15 @@ async function handleQuery(
   sessionId: string,
   query: string,
 ): Promise<Record<string, unknown>> {
+  // セッション内の対応付けを優先し、無ければ直近のAlexa会話を引き継ぐ
   const mapping = sessionConversations.get(sessionId);
+  const conversationId = mapping?.conversationId ?? deps.findRecentConversation?.();
   const work = deps.orchestrator
     .handleUserMessage({
       userId: deps.userId,
       text: query,
       source: 'alexa',
-      conversationId: mapping?.conversationId,
+      conversationId,
     })
     .then((result) => {
       sessionConversations.set(sessionId, { conversationId: result.conversationId, touchedAt: Date.now() });

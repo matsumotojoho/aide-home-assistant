@@ -10,10 +10,10 @@ import { getCookie, deleteCookie } from 'hono/cookie';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { v4 as uuid } from 'uuid';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { config } from './config.js';
 import { createDb } from './db/index.js';
-import { users } from './db/schema.js';
+import { conversations, users } from './db/schema.js';
 import { AuthService } from './auth.js';
 import { SettingsService } from './services/settings.js';
 import { MemoryService } from './services/memory.js';
@@ -149,6 +149,19 @@ async function main(): Promise<void> {
       settings,
       push,
       userId,
+      // Alexaのセッションが切れても、30分以内なら同じ会話を続ける
+      findRecentConversation: () => {
+        const row = db
+          .select()
+          .from(conversations)
+          .where(and(eq(conversations.userId, userId), eq(conversations.source, 'alexa')))
+          .orderBy(desc(conversations.updatedAt))
+          .limit(1)
+          .get();
+        if (!row) return undefined;
+        const age = Date.now() - Date.parse(row.updatedAt);
+        return age < 30 * 60_000 ? row.id : undefined;
+      },
       // 開発時のみ署名検証をスキップできる (本番では常に検証)
       verify:
         !config.isProd && process.env.ALEXA_SKIP_VERIFY === '1'

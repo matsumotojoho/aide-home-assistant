@@ -18,6 +18,8 @@ export type Intent =
   | { kind: 'home_ambiguous' }
   /** 天気・室温・家の状態など、Claudeを使わず即答できる問い合わせ */
   | { kind: 'status'; topic: 'weather' | 'indoor' | 'home' | 'time' }
+  /** 「さっきの回答教えて」— 直前の回答を読み上げ直す (Claude不要) */
+  | { kind: 'recall' }
   | { kind: 'schedule' }
   | { kind: 'mac' }
   | { kind: 'consult' };
