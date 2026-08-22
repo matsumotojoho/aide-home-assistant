@@ -82,6 +82,16 @@ Alexaは「耳と口」。判断・記憶・実行はBackend側 (仕様書3)。
   (呼び出し名を変えたら `INVOCATION_ALIASES` も更新)
 - 読み上げ長は `alexa.verbosity` に従って文単位で切る
 
+### 統合タイムライン (`GET /api/messages/recent`)
+仕様書2「Alexa、スマホ、PCのどこから話しても同じユーザー・同じ記憶・同じ設定」に対応し、
+PWAのChatは入口をまたいだ1本のタイムラインを表示する。
+
+- Alexaが8秒で打ち切ってバックグラウンドで書いた回答も、ここに後から現れる
+- Chatは8秒ごと + 画面復帰時にポーリングするので、開いたまま待てば表示される
+- 各メッセージに `source` を返し、画面ではAlexa由来にタグを出す
+- PWAから送信するとき、直近30分の会話があれば入口に関わらず引き継ぐ
+  (Alexaで話した直後にPWAで続けても文脈が切れない)
+
 ### LLM Provider abstraction (`src/llm/`)
 `LlmProvider` インターフェース (`available()` / `complete()`) の実装:
 

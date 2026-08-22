@@ -51,6 +51,19 @@ export function createApi(deps: ApiDeps): Hono {
   const api = new Hono();
   const { db, userId } = deps;
 
+  /** 直近30分以内に更新された会話があれば、その続きとして扱う */
+  const findRecentConversationId = (): string | undefined => {
+    const row = db
+      .select()
+      .from(conversations)
+      .where(eq(conversations.userId, userId))
+      .orderBy(desc(conversations.updatedAt))
+      .limit(1)
+      .get();
+    if (!row) return undefined;
+    return Date.now() - Date.parse(row.updatedAt) < 30 * 60_000 ? row.id : undefined;
+  };
+
   // ---------- auth ----------
   const loginLimiter = new LoginRateLimiter();
 
@@ -101,11 +114,14 @@ export function createApi(deps: ApiDeps): Hono {
     const text = (body.text ?? '').trim();
     if (!text) return c.json({ error: 'textが必要です' }, 400);
     const source = body.source === 'mobile' ? 'mobile' : 'web';
+    // 明示指定が無ければ、直近30分の会話を入口に関わらず引き継ぐ。
+    // (Alexaで話した直後にPWAで続けても文脈が切れないように)
+    const conversationId = body.conversationId ?? findRecentConversationId();
     const result = await deps.orchestrator.handleUserMessage({
       userId,
       text,
       source,
-      conversationId: body.conversationId,
+      conversationId,
     });
     return c.json(result);
   });
@@ -119,6 +135,26 @@ export function createApi(deps: ApiDeps): Hono {
       .limit(50)
       .all();
     return c.json(rows);
+  });
+
+  // 入口 (Alexa/Web/スマホ) をまたいだ統合タイムライン。
+  // 仕様書2: どこから話しても同じユーザー・同じ会話として扱う。
+  // Alexaが8秒で打ち切ってバックグラウンドで書いた回答も、ここに現れる。
+  api.get('/messages/recent', (c) => {
+    const limit = Math.min(Number(c.req.query('limit') ?? 100), 300);
+    const since = c.req.query('since');
+    const rows = db.$client
+      .prepare(
+        `SELECT m.id, m.role, m.content, m.created_at AS createdAt,
+                c.source, c.id AS conversationId
+         FROM messages m JOIN conversations c ON c.id = m.conversation_id
+         WHERE c.user_id = ?${since ? ' AND m.created_at > ?' : ''}
+         ORDER BY m.created_at DESC, m.rowid DESC
+         LIMIT ?`,
+      )
+      .all(...(since ? [userId, since, limit] : [userId, limit]));
+    // 画面では古い順に並べる
+    return c.json((rows as unknown[]).reverse());
   });
 
   api.get('/conversations/:id/messages', (c) => {

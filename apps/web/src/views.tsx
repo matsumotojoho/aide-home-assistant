@@ -97,48 +97,72 @@ export function ApprovalBanner({ approval, onDone }: { approval: Approval; onDon
 }
 
 // ============ Chat ============
+// 入口 (Alexa / スマホ / PC) をまたいだ1本のタイムライン。
+// Alexaが8秒で打ち切ってバックグラウンドで書いた回答も、ポーリングで後から現れる。
 interface ChatMsg {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  source?: string;
 }
+
+const SOURCE_LABEL: Record<string, string> = { alexa: 'Alexa', mobile: 'スマホ', scheduled: '予約実行' };
+const POLL_MS = 8000;
 
 export function ChatView() {
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const [conversationId, setConversationId] = useState<string | undefined>(() => {
-    return sessionStorage.getItem('aide.conversationId') ?? undefined;
-  });
+  const [loaded, setLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // 送信直後の楽観表示と、サーバー由来の履歴が二重に出ないようにする
+  const pendingRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (!conversationId) return;
-    api
-      .get<ChatMsg[]>(`/conversations/${conversationId}/messages`)
-      .then(setMsgs)
-      .catch(() => setMsgs([]));
+  const load = useCallback(async () => {
+    try {
+      const rows = await api.get<ChatMsg[]>('/messages/recent?limit=100');
+      setMsgs(rows);
+      setLoaded(true);
+      if (pendingRef.current && rows.some((r) => r.content === pendingRef.current)) {
+        pendingRef.current = null;
+      }
+    } catch {
+      /* 通信断は次回のポーリングで回復する */
+    }
   }, []);
 
   useEffect(() => {
+    void load();
+    const t = setInterval(() => void load(), POLL_MS);
+    // 画面に戻ってきたら即座に最新化する
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [load]);
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [msgs]);
+  }, [msgs.length, busy]);
 
   const send = async () => {
     const t = text.trim();
     if (!t || busy) return;
     setText('');
     setBusy(true);
+    pendingRef.current = t;
     setMsgs((m) => [...m, { role: 'user', content: t, createdAt: new Date().toISOString() }]);
     try {
-      const res = await api.post<{ reply: string; conversationId: string }>('/chat', {
+      await api.post('/chat', {
         text: t,
-        conversationId,
         source: /iPhone|Android/i.test(navigator.userAgent) ? 'mobile' : 'web',
       });
-      setConversationId(res.conversationId);
-      sessionStorage.setItem('aide.conversationId', res.conversationId);
-      setMsgs((m) => [...m, { role: 'assistant', content: res.reply, createdAt: new Date().toISOString() }]);
+      await load();
     } catch (err) {
       setMsgs((m) => [
         ...m,
@@ -156,17 +180,24 @@ export function ChatView() {
   return (
     <>
       <div className="chat">
-        {msgs.length === 0 && (
+        {loaded && msgs.length === 0 && (
           <div className="empty">
             「寝室の電気つけて」「19時に帰るから快適にしといて」
             <br />
             のように話しかけてください
+            <br />
+            <span style={{ fontSize: 12 }}>Alexaで話した内容もここに表示されます</span>
           </div>
         )}
         {msgs.map((m, i) => (
-          <div key={i} className={`msg ${m.role}`}>
+          <div key={m.id ?? `local-${i}`} className={`msg ${m.role}`}>
             {m.content}
-            <span className="time">{fmtJst(m.createdAt)}</span>
+            <span className="time">
+              {m.source && m.source !== 'web' && SOURCE_LABEL[m.source] && (
+                <span className="src-tag">{SOURCE_LABEL[m.source]}</span>
+              )}
+              {fmtJst(m.createdAt)}
+            </span>
           </div>
         ))}
         {busy && <div className="msg assistant">考えています...</div>}

@@ -163,3 +163,9 @@ h2.section { font-size: 13px; color: var(--text-dim); margin: 18px 0 8px; text-t
 .conn-status { font-size: 12px; }
 .conn-status.on { color: var(--ok); }
 .conn-status.off { color: var(--text-dim); }
+
+/* 発話の入口 (Alexa等) を示すタグ */
+.src-tag {
+  display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text-dim); font-size: 9.5px; letter-spacing: 0.04em;
+}
