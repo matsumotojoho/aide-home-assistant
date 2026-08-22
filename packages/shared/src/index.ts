@@ -104,9 +104,11 @@ export const HARD_CONFIRM_CATEGORIES: RiskCategory[] = [
 
 // ---------- Settings ----------
 export interface SettingsMap {
-  'ai.provider': 'auto' | 'claude-cli-local' | 'claude-via-mac' | 'anthropic-api' | 'openai-api';
+  'ai.provider': 'auto' | 'claude-cli-local' | 'claude-via-mac' | 'anthropic-api' | 'openai-api' | 'local-llm';
   'ai.paid_api_fallback': 'off' | 'on';
   'ai.api_model': string;
+  'ai.openai_model': string;
+  'ai.local_model': string; // Ollamaモデル名 (Phase 4)
   'ai.claude_cli_model': string; // '' = CLI既定
   'alexa.verbosity': 'short' | 'standard' | 'detailed' | 'full';
   'notifications.level': 'all' | 'important' | 'failure' | 'none';
@@ -116,12 +118,16 @@ export interface SettingsMap {
   'home.location': string; // "lat,lon" 天気取得用
   'mac.busy_mode': 'auto' | 'busy' | 'free';
   'mac.gui_policy': 'queue_when_busy' | 'always_queue' | 'always_run';
+  /** 確認なしで送信してよい相手 (仕様書16「この相手には確認不要」) */
+  'messaging.trusted_recipients': string[];
 }
 
 export const DEFAULT_SETTINGS: SettingsMap = {
   'ai.provider': 'auto',
   'ai.paid_api_fallback': 'off',
   'ai.api_model': 'claude-opus-5',
+  'ai.openai_model': 'gpt-5.2',
+  'ai.local_model': '',
   'ai.claude_cli_model': '',
   'alexa.verbosity': 'standard',
   'notifications.level': 'important',
@@ -131,12 +137,19 @@ export const DEFAULT_SETTINGS: SettingsMap = {
   'home.location': '',
   'mac.busy_mode': 'auto',
   'mac.gui_policy': 'queue_when_busy',
+  'messaging.trusted_recipients': [],
 };
 
 export type SettingKey = keyof SettingsMap;
 
 // ---------- Mac Agent WebSocket protocol ----------
-export type AgentRpcMethod = 'mac.execute' | 'mac.status' | 'llm.complete' | 'ha.request' | 'agent.set_mode';
+export type AgentRpcMethod =
+  | 'mac.execute'
+  | 'mac.status'
+  | 'llm.complete'
+  | 'ha.request'
+  | 'agent.set_mode'
+  | 'codex.run';
 
 export interface AgentRpcRequest {
   type: 'rpc';
@@ -171,7 +184,7 @@ export interface AgentStatusPush {
 export type AgentMessage = AgentRpcRequest | AgentRpcResponse | AgentHello | AgentStatusPush | { type: 'ping' } | { type: 'pong' };
 
 export interface MacExecuteParams {
-  kind: 'shell' | 'applescript' | 'open_app';
+  kind: 'shell' | 'applescript' | 'open_app' | 'playwright';
   command: string;
   gui?: boolean;
   timeoutMs?: number;

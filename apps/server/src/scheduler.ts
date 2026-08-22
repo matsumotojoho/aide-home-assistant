@@ -6,6 +6,7 @@
 import { and, eq, lte } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import type { ToolCallRequest } from '@aide/shared';
+import { nextOccurrence } from './recurrence.js';
 import type { Db } from './db/index.js';
 import { taskRuns, tasks } from './db/schema.js';
 import type { Orchestrator } from './orchestrator.js';
@@ -92,10 +93,19 @@ export class Scheduler {
         .set({ finishedAt: finished, status: ok ? 'done' : 'failed', summary: summary.slice(0, 2000), error: ok ? null : summary.slice(0, 2000) })
         .where(eq(taskRuns.id, runId))
         .run();
-      db.update(tasks)
-        .set({ status: ok ? 'done' : 'failed', updatedAt: finished })
-        .where(eq(tasks.id, task.id))
-        .run();
+      // 繰り返しタスクは次回実行をスケジュールし直す (失敗しても次回は実行する)
+      const next = task.recurrence ? nextOccurrence(task.recurrence, new Date()) : null;
+      if (next) {
+        db.update(tasks)
+          .set({ status: 'scheduled', runAt: next.toISOString(), updatedAt: finished })
+          .where(eq(tasks.id, task.id))
+          .run();
+      } else {
+        db.update(tasks)
+          .set({ status: ok ? 'done' : 'failed', updatedAt: finished })
+          .where(eq(tasks.id, task.id))
+          .run();
+      }
 
       await this.deps.push.notify(
         task.userId,

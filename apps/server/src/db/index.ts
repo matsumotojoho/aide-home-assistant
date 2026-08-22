@@ -43,6 +43,15 @@ CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
   INSERT INTO memories_fts(memories_fts, rowid, title, content) VALUES ('delete', old.rowid, old.title, old.content);
   INSERT INTO memories_fts(rowid, title, content) VALUES (new.rowid, new.title, new.content);
 END;
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+  content, content='messages', content_rowid='rowid', tokenize='trigram'
+);
+CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+  INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+END;
 CREATE TABLE IF NOT EXISTS preferences (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL, domain TEXT NOT NULL, key TEXT NOT NULL,
   value TEXT NOT NULL, note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -106,6 +115,16 @@ export function createDb(filePath: string): Db {
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('foreign_keys = ON');
   sqlite.exec(MIGRATION_SQL);
+  // FTS追加前から存在する行をインデックスへ取り込む (件数が合わない時のみ再構築)
+  try {
+    const msgCount = (sqlite.prepare('SELECT count(*) c FROM messages').get() as { c: number }).c;
+    const ftsCount = (sqlite.prepare('SELECT count(*) c FROM messages_fts').get() as { c: number }).c;
+    if (msgCount !== ftsCount) {
+      sqlite.exec("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')");
+    }
+  } catch {
+    /* fts5が無い環境では検索がLIKEにフォールバックする */
+  }
   const db = drizzle(sqlite, { schema }) as Db;
   return db;
 }

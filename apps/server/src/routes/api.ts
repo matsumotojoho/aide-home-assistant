@@ -422,7 +422,7 @@ export function createApi(deps: ApiDeps): Hono {
 
   // ---------- Alexa (Phase 2) ----------
   api.post('/alexa', (c) =>
-    c.json({ error: 'Alexa Custom SkillはPhase 2で実装予定です (docs/alexa-limitations.md参照)' }, 501),
+    c.json({ error: 'AlexaエンドポイントはトップレベルURLの /alexa です (docs/setup.md参照)' }, 404),
   );
 
   return api;

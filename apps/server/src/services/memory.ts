@@ -114,8 +114,18 @@ export class MemoryService {
     return rows.map(toRow);
   }
 
-  /** FTS5 (trigram) 全文検索。日本語対応。失敗時はLIKE検索へフォールバック。 */
+  /**
+   * FTS5 (trigram) 全文検索。日本語対応。失敗時はLIKE検索へフォールバック。
+   * 記憶に加え過去の会話 (messages) も対象にする。「この前調べたやつ何だっけ」に
+   * 会話履歴から答えられるようにするため (仕様書10)。
+   */
   search(query: string, limit = 8): MemoryRow[] {
+    const memories = this.searchMemories(query, limit);
+    const conversations = this.searchConversations(query, Math.max(2, limit - memories.length));
+    return [...memories, ...conversations].slice(0, limit);
+  }
+
+  private searchMemories(query: string, limit: number): MemoryRow[] {
     const q = query.trim();
     if (!q) return [];
     const sqlite = this.db.$client;
@@ -141,6 +151,58 @@ export class MemoryService {
       )
       .all(this.userId, like, like, limit) as (typeof memories.$inferSelect)[];
     return rows.map(toRow);
+  }
+
+  /** 過去の会話を検索し、会話単位でまとめた擬似Memory行として返す */
+  private searchConversations(query: string, limit: number): MemoryRow[] {
+    const q = query.trim();
+    if (!q) return [];
+    const sqlite = this.db.$client;
+    interface Hit {
+      conversation_id: string;
+      content: string;
+      created_at: string;
+      title: string | null;
+    }
+    let hits: Hit[] = [];
+    try {
+      const ftsQuery = `"${q.replace(/"/g, '""')}"`;
+      hits = sqlite
+        .prepare(
+          `SELECT m.conversation_id, m.content, m.created_at, c.title
+           FROM messages_fts f
+           JOIN messages m ON m.rowid = f.rowid
+           JOIN conversations c ON c.id = m.conversation_id
+           WHERE messages_fts MATCH ? AND c.user_id = ?
+           ORDER BY rank LIMIT ?`,
+        )
+        .all(ftsQuery, this.userId, limit * 3) as Hit[];
+    } catch {
+      const like = `%${q}%`;
+      hits = sqlite
+        .prepare(
+          `SELECT m.conversation_id, m.content, m.created_at, c.title
+           FROM messages m JOIN conversations c ON c.id = m.conversation_id
+           WHERE c.user_id = ? AND m.content LIKE ?
+           ORDER BY m.created_at DESC LIMIT ?`,
+        )
+        .all(this.userId, like, limit * 3) as Hit[];
+    }
+    // 会話単位で1件にまとめる (同じ会話の複数メッセージが並ぶのを防ぐ)
+    const byConv = new Map<string, Hit>();
+    for (const h of hits) {
+      if (!byConv.has(h.conversation_id)) byConv.set(h.conversation_id, h);
+    }
+    return [...byConv.values()].slice(0, limit).map((h) => ({
+      id: `conv:${h.conversation_id}`,
+      kind: 'conversation',
+      title: `[過去の会話] ${h.title ?? '無題'}`,
+      content: h.content.slice(0, 500),
+      source: 'conversation',
+      tags: [],
+      createdAt: h.created_at,
+      updatedAt: h.created_at,
+    }));
   }
 
   /** 保存期間設定に基づく期限切れ削除 (schedulerから定期実行) */

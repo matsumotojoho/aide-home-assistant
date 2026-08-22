@@ -1,0 +1,42 @@
+{
+  "manifest": {
+    "manifestVersion": "1.0",
+    "publishingInformation": {
+      "locales": {
+        "ja-JP": {
+          "name": "マイアシスタント",
+          "summary": "自分専用のAIアシスタント",
+          "description": "家電の操作、予定の確認、調べ物などを自然な言葉で頼めるパーソナルAIアシスタントです。",
+          "examplePhrases": [
+            "アレクサ、マイアシスタントを開いて",
+            "アレクサ、マイアシスタントでリビングの電気つけて",
+            "アレクサ、マイアシスタントで今日の天気を教えて"
+          ],
+          "keywords": ["アシスタント", "スマートホーム"]
+        }
+      },
+      "isAvailableWorldwide": false,
+      "distributionCountries": ["JP"],
+      "distributionMode": "PRIVATE",
+      "category": "SMART_HOME"
+    },
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "uri": "https://REPLACE_WITH_YOUR_RAILWAY_DOMAIN/alexa",
+          "sslCertificateType": "Trusted"
+        },
+        "interfaces": []
+      }
+    },
+    "manifestAttributes": { "explicitLanguageAndContentRequired": false },
+    "privacyAndCompliance": {
+      "allowsPurchases": false,
+      "usesPersonalInfo": true,
+      "isChildDirected": false,
+      "isExportCompliant": true,
+      "containsAds": false,
+      "locales": { "ja-JP": { "privacyPolicyUrl": "", "termsOfUseUrl": "" } }
+    }
+  }
+}

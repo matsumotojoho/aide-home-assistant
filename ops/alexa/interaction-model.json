@@ -1,0 +1,26 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "マイ アシスタント",
+      "intents": [
+        { "name": "AMAZON.StopIntent", "samples": [] },
+        { "name": "AMAZON.CancelIntent", "samples": [] },
+        { "name": "AMAZON.HelpIntent", "samples": [] },
+        { "name": "AMAZON.FallbackIntent", "samples": [] },
+        {
+          "name": "CatchAllIntent",
+          "slots": [{ "name": "query", "type": "AMAZON.SearchQuery" }],
+          "samples": [
+            "{query}",
+            "{query} して",
+            "{query} をお願い",
+            "{query} って伝えて",
+            "{query} を教えて",
+            "{query} はどう"
+          ]
+        }
+      ],
+      "types": []
+    }
+  }
+}

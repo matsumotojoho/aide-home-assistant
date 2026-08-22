@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { and, eq, inArray } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import type { ToolDef } from './registry.js';
+import { RECURRENCE_RE, isValidRecurrence } from '../recurrence.js';
 import { tasks } from '../db/schema.js';
 
 // ---------- memory.* ----------
@@ -90,12 +91,21 @@ export const tasksCreate: ToolDef = {
     plan: planSchema,
     reevaluate: z.boolean().optional(),
     intent_text: z.string().optional(),
+    recurrence: z
+      .string()
+      .regex(RECURRENCE_RE, 'recurrenceは daily@HH:MM または weekly:MON@HH:MM 形式 (JST)')
+      .optional(),
   }),
   inputDoc:
-    '{"title":"帰宅前の冷房","run_at":"2026-08-20T18:30:00+09:00","plan":[{"tool":"home.execute","input":{...}}],"reevaluate":true,"intent_text":"19時に帰るから快適にしといて"}',
+    '{"title":"帰宅前の冷房","run_at":"2026-08-20T18:30:00+09:00","plan":[{"tool":"home.execute","input":{...}}],"reevaluate":true,"intent_text":"19時に帰るから快適にしといて"} ' +
+    '毎日/毎週の繰り返しはrecurrence:"daily@07:00"等 (JST)',
   async execute(ctx, input) {
     const runAt = new Date(String(input.run_at));
     if (Number.isNaN(runAt.getTime())) return { ok: false, error: 'run_at の日時形式が不正です (ISO 8601で指定)' };
+    const recurrence = (input.recurrence as string | undefined) ?? null;
+    if (recurrence && !isValidRecurrence(recurrence)) {
+      return { ok: false, error: 'recurrenceの形式が不正です (daily@HH:MM / weekly:MON@HH:MM)' };
+    }
     const now = new Date().toISOString();
     const id = uuid();
     ctx.db
@@ -105,7 +115,7 @@ export const tasksCreate: ToolDef = {
         userId: ctx.userId,
         title: String(input.title),
         runAt: runAt.toISOString(),
-        recurrence: null,
+        recurrence,
         plan: JSON.stringify(input.plan),
         reevaluate: input.reevaluate ? 1 : 0,
         intentText: (input.intent_text as string) ?? null,
@@ -203,6 +213,7 @@ export const tasksList: ToolDef = {
         title: r.title,
         run_at: r.runAt,
         status: r.status,
+        recurrence: r.recurrence,
         reevaluate: r.reevaluate === 1,
         plan: JSON.parse(r.plan),
       })),

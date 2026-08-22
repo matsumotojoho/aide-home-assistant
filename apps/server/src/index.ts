@@ -25,6 +25,7 @@ import { createProviderSelector } from './llm/index.js';
 import { Orchestrator } from './orchestrator.js';
 import { Scheduler } from './scheduler.js';
 import { createApi } from './routes/api.js';
+import { createAlexaApp } from './alexa/skill.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -101,6 +102,22 @@ async function main(): Promise<void> {
       ha,
       gateway,
       buildToolContext,
+    }),
+  );
+
+  // Alexa Custom Skill (Phase 2)。/api配下ではなくトップレベル (セッション認証でなく署名検証)
+  app.route(
+    '/alexa',
+    createAlexaApp({
+      orchestrator,
+      settings,
+      push,
+      userId,
+      // 開発時のみ署名検証をスキップできる (本番では常に検証)
+      verify:
+        !config.isProd && process.env.ALEXA_SKIP_VERIFY === '1'
+          ? async () => undefined
+          : undefined,
     }),
   );
 
