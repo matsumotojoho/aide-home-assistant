@@ -72,8 +72,18 @@ const INVOCATION_ALIASES = ['エージェント', 'えーじぇんと', 'エー�
 const PARTICLE_RE = /^(で|に|を|の|、|,|\s)+/;
 // 「開いて」等しか残らなければ、それは起動要求であって用件ではない
 const LAUNCH_ONLY_RE = /^(を|に)?(開いて|ひらいて|開けて|起動して|つないで|呼んで|スタート|start)$/i;
+// 会話の切り上げ。NLUがStopIntentに寄せてくれない場合の保険として、
+// 用件ではないと分かるものはClaudeへ回さずその場で終える。
+// (「ありがとう」がCatchAllIntentに吸われてClaude行きになり、
+//  「スマホに通知しますね」と返ってしまう事故を防ぐ)
+const CLOSING_RE =
+  /^(ありがと(う|ー)?(ございます|ございました)?|どうも(ありがとう)?|おしまい|終わり|終わって|もういい(よ|です)?|もう大丈夫|大丈夫(です)?|以上(です)?|なんでもない|バイバイ|またね|おやすみ(なさい)?)[。！!、,]?$/;
 
-export function normalizeAlexaQuery(raw: string): { query: string; isLaunch: boolean } {
+export function normalizeAlexaQuery(raw: string): {
+  query: string;
+  isLaunch: boolean;
+  isClosing?: boolean;
+} {
   let text = raw.normalize('NFKC').trim();
   for (const alias of INVOCATION_ALIASES) {
     if (text.startsWith(alias)) {
@@ -83,6 +93,9 @@ export function normalizeAlexaQuery(raw: string): { query: string; isLaunch: boo
   }
   if (text === '' || LAUNCH_ONLY_RE.test(text)) {
     return { query: '', isLaunch: true };
+  }
+  if (CLOSING_RE.test(text)) {
+    return { query: '', isLaunch: false, isClosing: true };
   }
   return { query: text, isLaunch: false };
 }
@@ -96,6 +109,13 @@ export function trimForAlexa(text: string, verbosity: 'short' | 'standard' | 'de
   const { n, chars } = limits[verbosity];
   const joined = sentences.slice(0, n).join('');
   return joined.length > chars ? `${joined.slice(0, chars)}…` : joined || clean.slice(0, chars);
+}
+
+/** 終わり方に合わせた短い締めの言葉 */
+function closingReply(raw: string): string {
+  if (/ありがと|どうも/.test(raw)) return 'どういたしまして。';
+  if (/おやすみ/.test(raw)) return 'おやすみなさい。';
+  return 'はい、またどうぞ。';
 }
 
 function speechResponse(text: string, endSession: boolean, reprompt?: string): Record<string, unknown> {
@@ -170,7 +190,7 @@ export function createAlexaApp(deps: AlexaDeps): Hono {
         const intentName = body.request.intent?.name ?? '';
         if (intentName === 'AMAZON.StopIntent' || intentName === 'AMAZON.CancelIntent') {
           sessionConversations.delete(sessionId);
-          return c.json(speechResponse('はい。', true));
+          return c.json(speechResponse(closingReply(body.request.intent?.slots?.query?.value ?? ''), true));
         }
         if (intentName === 'AMAZON.HelpIntent') {
           return c.json(
@@ -185,7 +205,10 @@ export function createAlexaApp(deps: AlexaDeps): Hono {
         }
 
         const rawQuery = body.request.intent?.slots?.query?.value?.trim() ?? '';
-        const { query, isLaunch } = normalizeAlexaQuery(rawQuery);
+        const { query, isLaunch, isClosing } = normalizeAlexaQuery(rawQuery);
+        if (isClosing) {
+          return c.json(speechResponse(closingReply(rawQuery), true));
+        }
         // 「えーあいを開いて」のような起動だけの発話はClaudeを呼ばずに即応答する
         if (isLaunch) {
           return c.json(speechResponse('はい、何をしましょう?', false, 'ご用件をどうぞ。'));

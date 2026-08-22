@@ -248,3 +248,73 @@ describe('呼び出し名が混ざった発話の正規化 (実機で発覚)', (
     });
   });
 });
+
+describe('会話の終わり方', () => {
+  it('「ありがとう」等はClaudeを呼ばずに終了する', async () => {
+    const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
+    for (const text of [
+      'ありがとう',
+      'ありがとうございます',
+      'もういいよ',
+      'もう大丈夫',
+      '終わり',
+      'おしまい',
+      '以上です',
+      'おやすみ',
+      'バイバイ',
+    ]) {
+      expect(normalizeAlexaQuery(text).isClosing, text).toBe(true);
+    }
+  });
+
+  it('用件のある発話は終了扱いしない', async () => {
+    const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
+    for (const text of [
+      'リビングの電気つけて',
+      'ありがとうって田中さんに伝えて',
+      '大丈夫かどうか調べて',
+      'おやすみモードにして',
+    ]) {
+      expect(normalizeAlexaQuery(text).isClosing ?? false, text).toBe(false);
+    }
+  });
+
+  it('「ありがとう」にはセッションを閉じて返す (Claude未使用)', async () => {
+    let called = 0;
+    const app = createAlexaApp({
+      orchestrator: {
+        handleUserMessage: async () => {
+          called++;
+          return { reply: 'x', conversationId: 'c', intent: 'consult' as const, pendingApprovalIds: [] };
+        },
+      } as never,
+      settings: { get: () => 'standard' } as never,
+      push: { notify: async () => undefined } as never,
+      userId: 'u1',
+      verify: async () => undefined,
+    });
+    const res = await app.request('/', {
+      method: 'POST',
+      body: JSON.stringify(
+        alexaRequest({
+          type: 'IntentRequest',
+          intent: { name: 'CatchAllIntent', slots: { query: { name: 'query', value: 'ありがとう' } } },
+        }),
+      ),
+      headers: { signaturecertchainurl: 'https://s3.amazonaws.com/echo.api/c', 'signature-256': 'x' },
+    });
+    const json = (await res.json()) as Record<string, unknown>;
+    const resp = json.response as Record<string, unknown>;
+    expect(called).toBe(0);
+    expect(resp.shouldEndSession).toBe(true);
+    expect((resp.outputSpeech as Record<string, unknown>).text).toBe('どういたしまして。');
+  });
+
+  it('StopIntentもセッションを閉じる', async () => {
+    const app = makeApp({});
+    const { json } = await post(app, alexaRequest({ type: 'IntentRequest', intent: { name: 'AMAZON.StopIntent' } }));
+    const resp = json.response as Record<string, unknown>;
+    expect(resp.shouldEndSession).toBe(true);
+    expect((resp.outputSpeech as Record<string, unknown>).text).toContain('また');
+  });
+});

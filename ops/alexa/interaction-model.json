@@ -5,7 +5,19 @@
       "intents": [
         {
           "name": "AMAZON.StopIntent",
-          "samples": []
+          "samples": [
+            "ありがとう",
+            "ありがとうございます",
+            "ありがと",
+            "終わり",
+            "おしまい",
+            "もういいよ",
+            "もう大丈夫",
+            "大丈夫",
+            "いいえ",
+            "なんでもない",
+            "以上"
+          ]
         },
         {
           "name": "AMAZON.CancelIntent",
