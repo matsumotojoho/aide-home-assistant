@@ -903,10 +903,12 @@ export function SettingsView() {
       <h2 className="section">AI</h2>
       <div className="card">
         {sel('ai.provider', [
-          ['auto', '自動 (Claude CLI → Mac Agent経由)'],
+          ['auto', '自動 (Claude CLI → Mac Agent → ローカルLLM)'],
           ['claude-cli-local', 'Claude Code CLI (ローカル)'],
           ['claude-via-mac', 'Claude (Mac Agent経由)'],
+          ['local-llm', 'ローカルLLM (Ollama)'],
           ['anthropic-api', 'Anthropic API (有料)'],
+          ['openai-api', 'OpenAI API (有料)'],
         ])}
         {sel('ai.paid_api_fallback', [
           ['off', '有料APIフォールバック: OFF'],
@@ -922,6 +924,15 @@ export function SettingsView() {
           ['90d', '90日'],
           ['1y', '1年'],
         ])}
+        <label className="field">
+          <span>ローカルLLMのモデル名 (Ollama。空欄で無効)</span>
+          <input
+            value={settings['ai.local_model'] ?? ''}
+            onChange={(e) => setSettings((s) => ({ ...s, 'ai.local_model': e.target.value }))}
+            onBlur={(e) => void setSetting('ai.local_model', e.target.value)}
+            placeholder="例: qwen3:8b"
+          />
+        </label>
       </div>
 
       <h2 className="section">Alexa / ホーム</h2>

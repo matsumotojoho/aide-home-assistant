@@ -74,6 +74,7 @@ async function main(): Promise<void> {
     settings,
     gateway,
     anthropicApiKey: config.anthropicApiKey,
+    openaiApiKey: config.openaiApiKey,
   });
 
   const buildToolContext = (source: ToolContext['source']): ToolContext => ({

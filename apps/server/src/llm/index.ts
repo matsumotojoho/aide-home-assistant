@@ -3,6 +3,8 @@ import type { AgentGateway } from '../agentGateway.js';
 import { ClaudeCliProvider } from './claudeCli.js';
 import { MacBridgeProvider } from './macBridge.js';
 import { AnthropicApiProvider } from './anthropicApi.js';
+import { OpenAiApiProvider } from './openaiApi.js';
+import { LocalLlmProvider } from './localLlm.js';
 import { ProviderUnavailableError, type LlmProvider } from './provider.js';
 
 export * from './provider.js';
@@ -17,6 +19,7 @@ export function createProviderSelector(deps: {
   settings: SettingsService;
   gateway: AgentGateway;
   anthropicApiKey: string;
+  openaiApiKey?: string;
 }): ProviderSelector {
   const { settings, gateway } = deps;
   const cli = new ClaudeCliProvider();
@@ -26,10 +29,19 @@ export function createProviderSelector(deps: {
     () => settings.get('ai.paid_api_fallback') === 'on',
   );
 
+  const openai = new OpenAiApiProvider(
+    deps.openaiApiKey ?? '',
+    () => settings.get('ai.paid_api_fallback') === 'on',
+    () => settings.get('ai.openai_model'),
+  );
+  const local = new LocalLlmProvider(() => settings.get('ai.local_model'));
+
   const byId: Record<string, LlmProvider> = {
     'claude-cli-local': cli,
     'claude-via-mac': bridge,
     'anthropic-api': api,
+    'openai-api': openai,
+    'local-llm': local,
   };
 
   return {
@@ -45,12 +57,22 @@ export function createProviderSelector(deps: {
         if (!(await p.available())) {
           throw new ProviderUnavailableError(`Provider ${configured} は現在利用できません`);
         }
-        return wrapWithModel(p, configured === 'anthropic-api' ? apiModel : cliModel);
+        const model =
+          configured === 'anthropic-api'
+            ? apiModel
+            : configured === 'openai-api'
+              ? settings.get('ai.openai_model')
+              : configured === 'local-llm'
+                ? settings.get('ai.local_model')
+                : cliModel;
+        return wrapWithModel(p, model);
       }
 
-      // auto: ローカルCLI → Mac Agent経由 の順で選択。有料APIへは自動フォールバックしない。
+      // auto: ローカルCLI → Mac Agent経由 → ローカルLLM の順。
+      // 有料API (Anthropic/OpenAI) へは絶対に自動フォールバックしない (仕様書30/31)。
       if (await cli.available()) return wrapWithModel(cli, cliModel);
       if (await bridge.available()) return wrapWithModel(bridge, cliModel);
+      if (await local.available()) return wrapWithModel(local, settings.get('ai.local_model'));
       throw new ProviderUnavailableError(
         'Claude Code CLIが見つからず、Mac Agentも未接続のためAI判断機能を利用できません',
       );
