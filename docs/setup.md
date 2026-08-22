@@ -138,3 +138,36 @@ npm run typecheck
 - [ ] 有料APIを一切有効化せず動作する (設定でOFFのまま)
 - [ ] Web Push通知が届く (予約タスク完了時)
 - [ ] 履歴から「元に戻す」で家電が復元される
+
+## 本番構成 (2026-08-22 移行完了)
+
+```
+スマホ / PC / Alexa
+        │ HTTPS
+   Railway (aide-server)          ← 公開URL・PWA配信・Alexaエンドポイント
+        │ WebSocket (Mac→Railwayへのoutbound)
+   Mac Agent (Mac mini常駐)
+        ├→ Home Assistant (LAN)   ← 家電操作はここを経由
+        ├→ Claude Code CLI        ← AI判断はここを経由 (サブスク枠)
+        └→ Playwright / shell
+```
+
+- 公開URL: `https://aide-server-production-49d1.up.railway.app`
+- データ: Railway Persistent Volume の `/data/aide.db`
+- `HA_BASE_URL` / `HA_TOKEN` はRailway側では**空**。LANへ直接届かないため、
+  Mac Agentの `ha.request` プロキシ経由で操作する (トークンはMac側の `~/.aide/agent.env` にのみ置く)
+- ローカルのBackend (`com.aide.server`) は停止済み。戻す場合は
+  `launchctl load ~/Library/LaunchAgents/com.aide.server.plist` して
+  `~/.aide/agent.env` の `AIDE_SERVER_URL` を `ws://localhost:8787/agent/ws` に戻す
+
+実測レイテンシ (クラウド経由): 家電のON/OFF 約930ms、Claude判断は数秒。
+
+### データ移行
+
+インスタンス間でデバイス登録・設定・権限・記憶を移す:
+
+```sh
+node ops/migrate-data.mjs <移行元URL> <移行先URL> <パスワード>
+```
+
+会話履歴は移行対象外 (移行元に残る)。

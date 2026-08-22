@@ -23,7 +23,7 @@
     "apis": {
       "custom": {
         "endpoint": {
-          "uri": "https://REPLACE_WITH_YOUR_RAILWAY_DOMAIN/alexa",
+          "uri": "https://aide-server-production-49d1.up.railway.app/alexa",
           "sslCertificateType": "Trusted"
         },
         "interfaces": []
