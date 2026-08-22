@@ -51,7 +51,8 @@ async function post(app: ReturnType<typeof makeApp>, body: unknown) {
   const res = await app.request('/', {
     method: 'POST',
     body: JSON.stringify(body),
-    headers: { signaturecertchainurl: 'https://s3.amazonaws.com/echo.api/cert', signature: 'x' },
+    // 実際にAlexaが送るヘッダー名 (ハイフン区切り)
+    headers: { 'Signature-Cert-Chain-Url': 'https://s3.amazonaws.com/echo.api/cert', Signature: 'x' },
   });
   return { status: res.status, json: (await res.json()) as Record<string, unknown> };
 }
@@ -69,6 +70,27 @@ describe('Alexa Skill エンドポイント', () => {
     (body.request as Record<string, unknown>).timestamp = new Date(Date.now() - 300_000).toISOString();
     const { status } = await post(app, body);
     expect(status).toBe(400);
+  });
+
+  it('Alexaが実際に送るヘッダー名 (Signature-Cert-Chain-Url) を読める', async () => {
+    // 本番で発覚: ハイフン無しの名前で読んでいて全リクエストが弾かれていた
+    const seen: Array<{ certUrl: string; signature: string }> = [];
+    const app = createAlexaApp({
+      orchestrator: { handleUserMessage: async () => ({ reply: 'ok', conversationId: 'c', intent: 'consult' as const, pendingApprovalIds: [] }) } as never,
+      settings: { get: () => 'standard' } as never,
+      push: { notify: async () => undefined } as never,
+      userId: 'u1',
+      verify: async (certUrl, signature) => {
+        seen.push({ certUrl, signature });
+      },
+    });
+    await app.request('/', {
+      method: 'POST',
+      body: JSON.stringify(alexaRequest({ type: 'LaunchRequest' })),
+      headers: { 'Signature-Cert-Chain-Url': 'https://s3.amazonaws.com/echo.api/abc', Signature: 'sig123' },
+    });
+    expect(seen[0].certUrl).toBe('https://s3.amazonaws.com/echo.api/abc');
+    expect(seen[0].signature).toBe('sig123');
   });
 
   it('LaunchRequest は起動あいさつ + セッション維持', async () => {

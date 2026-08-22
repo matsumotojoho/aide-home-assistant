@@ -9,18 +9,50 @@
         { "name": "AMAZON.FallbackIntent", "samples": [] },
         {
           "name": "CatchAllIntent",
-          "slots": [{ "name": "query", "type": "AMAZON.SearchQuery" }],
-          "samples": [
-            "{query}",
-            "{query} して",
-            "{query} をお願い",
-            "{query} って伝えて",
-            "{query} を教えて",
-            "{query} はどう"
-          ]
+          "slots": [{ "name": "query", "type": "QueryType" }],
+          "samples": ["{query}"]
         }
       ],
-      "types": []
+      "types": [
+        {
+          "name": "QueryType",
+          "values": [
+            { "name": { "value": "リビングの電気つけて" } },
+            { "name": { "value": "リビングの電気消して" } },
+            { "name": { "value": "寝室の電気つけて" } },
+            { "name": { "value": "寝室の電気消して" } },
+            { "name": { "value": "ダイニングの電気つけて" } },
+            { "name": { "value": "電気つけて" } },
+            { "name": { "value": "電気消して" } },
+            { "name": { "value": "エアコンつけて" } },
+            { "name": { "value": "エアコン消して" } },
+            { "name": { "value": "寝室のエアコン26度にして" } },
+            { "name": { "value": "冷房25度にして" } },
+            { "name": { "value": "暖房22度にして" } },
+            { "name": { "value": "部屋いい感じにして" } },
+            { "name": { "value": "エアコン快適にして" } },
+            { "name": { "value": "ちょっと暗くして" } },
+            { "name": { "value": "もう少し明るくして" } },
+            { "name": { "value": "寝る準備して" } },
+            { "name": { "value": "寝室もお願い" } },
+            { "name": { "value": "テレビはいらない" } },
+            { "name": { "value": "やっぱりエアコン少し弱めて" } },
+            { "name": { "value": "今日19時に帰るから快適にしといて" } },
+            { "name": { "value": "30分後にエアコンつけといて" } },
+            { "name": { "value": "明日の朝7時に電気つけて" } },
+            { "name": { "value": "今の家の状況を教えて" } },
+            { "name": { "value": "今何度" } },
+            { "name": { "value": "室温は" } },
+            { "name": { "value": "今日の天気を教えて" } },
+            { "name": { "value": "明日の予定を教えて" } },
+            { "name": { "value": "この前調べたやつ何だっけ" } },
+            { "name": { "value": "田中さんに30分遅れるって伝えて" } },
+            { "name": { "value": "玄関の鍵閉まってる" } },
+            { "name": { "value": "予約してるタスクを教えて" } },
+            { "name": { "value": "さっきの取り消して" } }
+          ]
+        }
+      ]
     }
   }
 }

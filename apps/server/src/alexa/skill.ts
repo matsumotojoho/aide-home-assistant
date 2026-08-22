@@ -84,8 +84,15 @@ export function createAlexaApp(deps: AlexaDeps): Hono {
   app.post('/', async (c) => {
     // 署名検証は必ず生のボディに対して行う
     const rawBody = await c.req.text();
-    const certUrl = c.req.header('signaturecertchainurl') ?? '';
+    // Alexaのヘッダーは Signature-Cert-Chain-Url / Signature (ハイフン区切り)。
+    // 旧SDK互換で SignatureCertChainUrl を送る経路もあるため両方受ける。
+    const certUrl =
+      c.req.header('signature-cert-chain-url') ?? c.req.header('signaturecertchainurl') ?? '';
     const signature = c.req.header('signature') ?? '';
+    // 到達したことを必ず残す (届いていないのか、弾いているのかを切り分けるため)
+    console.log(
+      `[alexa] 受信 body=${rawBody.length}B cert=${certUrl ? 'あり' : 'なし'} sig=${signature ? 'あり' : 'なし'}`,
+    );
     try {
       await verify(certUrl, signature, rawBody);
     } catch (err) {
@@ -97,14 +104,19 @@ export function createAlexaApp(deps: AlexaDeps): Hono {
     try {
       body = JSON.parse(rawBody) as AlexaRequestBody;
     } catch {
+      console.warn('[alexa] JSONとして解釈できませんでした');
       return c.json({ error: 'invalid body' }, 400);
     }
 
     // タイムスタンプ検証 (リプレイ防止 / 公式要件は150秒以内)
     const ts = body.request?.timestamp ? Date.parse(body.request.timestamp) : NaN;
     if (Number.isNaN(ts) || Math.abs(Date.now() - ts) > 150_000) {
+      console.warn(
+        `[alexa] タイムスタンプ不正: ${body.request?.timestamp ?? '(なし)'} (サーバー時刻 ${new Date().toISOString()})`,
+      );
       return c.json({ error: 'stale request' }, 400);
     }
+    console.log(`[alexa] type=${body.request.type} intent=${body.request.intent?.name ?? '-'}`);
 
     gcSessions();
     const sessionId = body.session?.sessionId ?? 'no-session';
