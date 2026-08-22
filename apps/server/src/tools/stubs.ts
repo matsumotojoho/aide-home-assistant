@@ -45,21 +45,6 @@ function stub(
 
 const anyObj = z.record(z.unknown());
 
-export const messagePrepare = stub(
-  'message.prepare',
-  '送信メッセージ案を作成しスマホ承認へ回す (LINE/Slack等)',
-  '{"to":"田中さん","service":"line","body":"30分ほど遅れます"}',
-  anyObj,
-  'messaging',
-);
-export const messageSend = stub(
-  'message.send',
-  '承認済みメッセージを送信する',
-  '{"approval_id":"..."}',
-  anyObj,
-  'messaging',
-);
-
 export const webSearch: ToolDef = {
   name: 'web.search',
   description:

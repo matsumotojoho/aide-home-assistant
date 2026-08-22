@@ -2,10 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, fmtJst, registerPush } from './api';
 import type { Approval } from './App';
 
-// ============ 承認バナー (仕様書16: 修正/送信/キャンセル) ============
+// ============ 承認バナー (仕様書16: 送信先・サービス・本文 + 修正/送信/キャンセル) ============
 export function ApprovalBanner({ approval, onDone }: { approval: Approval; onDone: () => void }) {
+  const input = approval.payload.input as Record<string, unknown>;
+  const tool = approval.payload.tool;
+  const isMessage = tool === 'message.send' || tool === 'mail.send';
+
   const [editing, setEditing] = useState(false);
-  const [inputJson, setInputJson] = useState(() => JSON.stringify(approval.payload.input, null, 2));
+  const [body, setBody] = useState(String(input.body ?? ''));
+  const [inputJson, setInputJson] = useState(() => JSON.stringify(input, null, 2));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -14,8 +19,9 @@ export function ApprovalBanner({ approval, onDone }: { approval: Approval; onDon
     setError('');
     try {
       let editedInput: Record<string, unknown> | undefined;
-      if (editing && action === 'approve') {
-        editedInput = JSON.parse(inputJson) as Record<string, unknown>;
+      if (action === 'approve' && editing) {
+        // メッセージは本文だけ差し替え、それ以外はJSONをそのまま使う
+        editedInput = isMessage ? { ...input, body } : (JSON.parse(inputJson) as Record<string, unknown>);
       }
       await api.post(`/approvals/${approval.id}/respond`, { action, editedInput });
       onDone();
@@ -26,31 +32,65 @@ export function ApprovalBanner({ approval, onDone }: { approval: Approval; onDon
     }
   };
 
+  const serviceLabel =
+    tool === 'mail.send' ? 'メール' : input.channel === 'line' ? 'LINE' : input.channel === 'slack' ? 'Slack' : '';
+
   return (
     <div className="card approval">
       <h3>
-        承認待ち <span className={`pill ${approval.payload.riskLabel === 'high' ? 'fail' : 'warn'}`}>{approval.payload.category}</span>
+        確認してください{' '}
+        <span className={`pill ${approval.payload.riskLabel === 'high' ? 'fail' : 'warn'}`}>
+          {approval.payload.riskLabel === 'high' ? '重要' : '確認'}
+        </span>
       </h3>
-      <div>{approval.title}</div>
-      <div className="meta">
-        {approval.payload.tool} ・ {fmtJst(approval.createdAt)}
-      </div>
-      {editing ? (
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>{approval.title}</div>
+
+      {isMessage ? (
+        <div className="approval-detail">
+          <div className="row">
+            <span className="label">送信先</span>
+            <span className="grow">{String(input.recipient_name ?? input.to ?? '')}</span>
+          </div>
+          {serviceLabel && (
+            <div className="row">
+              <span className="label">手段</span>
+              <span className="grow">{serviceLabel}</span>
+            </div>
+          )}
+          {Boolean(input.subject) && (
+            <div className="row">
+              <span className="label">件名</span>
+              <span className="grow">{String(input.subject)}</span>
+            </div>
+          )}
+          <div className="label" style={{ marginTop: 6 }}>
+            本文
+          </div>
+          {editing ? (
+            <textarea rows={5} value={body} onChange={(e) => setBody(e.target.value)} autoFocus />
+          ) : (
+            <div className="message-body">{body}</div>
+          )}
+          <div className="meta">送信すると取り消せません</div>
+        </div>
+      ) : editing ? (
         <textarea rows={5} value={inputJson} onChange={(e) => setInputJson(e.target.value)} />
       ) : (
-        <pre style={{ fontSize: 12, overflowX: 'auto' }}>{JSON.stringify(approval.payload.input, null, 1)}</pre>
+        <pre className="approval-json">{JSON.stringify(input, null, 1)}</pre>
       )}
+
       <div className="actions">
-        <button className="btn sm" disabled={busy} onClick={() => respond('approve')}>
-          許可して実行
+        <button className="btn sm" disabled={busy} onClick={() => void respond('approve')}>
+          送信
         </button>
         <button className="btn sm secondary" disabled={busy} onClick={() => setEditing(!editing)}>
           {editing ? '編集をやめる' : '修正'}
         </button>
-        <button className="btn sm danger" disabled={busy} onClick={() => respond('reject')}>
+        <button className="btn sm danger" disabled={busy} onClick={() => void respond('reject')}>
           キャンセル
         </button>
       </div>
+      <div className="meta">{fmtJst(approval.createdAt)}</div>
       {error && <div className="error-text">{error}</div>}
     </div>
   );
@@ -542,6 +582,193 @@ const CATEGORY_LABELS: Record<string, string> = {
   system: 'システム情報',
 };
 
+function ConnectionsSection() {
+  const [google, setGoogle] = useState<{ connected: boolean; email?: string } | null>(null);
+  const [msg, setMsg] = useState<{ line: boolean; slack: boolean; slackDefaultTo?: string } | null>(null);
+  const [creds, setCreds] = useState({ clientId: '', clientSecret: '' });
+  const [line, setLine] = useState({ lineToken: '', lineDefaultTo: '' });
+  const [slack, setSlack] = useState({ slackToken: '', slackDefaultTo: '' });
+  const [note, setNote] = useState('');
+
+  const refresh = useCallback(async () => {
+    try {
+      setGoogle(await api.get('/google/status'));
+      setMsg(await api.get('/messaging/status'));
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const connectGoogle = async () => {
+    setNote('');
+    try {
+      if (creds.clientId && creds.clientSecret) {
+        await api.post('/google/credentials', creds);
+      }
+      const { url } = await api.get<{ url: string }>('/google/auth-url');
+      // 同意画面へ移動 (完了後 /api/google/callback に戻る)
+      location.href = url;
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : '接続に失敗しました');
+    }
+  };
+
+  const saveMessaging = async (patch: Record<string, string>) => {
+    setNote('');
+    try {
+      await api.post('/messaging/config', patch);
+      setLine({ lineToken: '', lineDefaultTo: line.lineDefaultTo });
+      setSlack({ slackToken: '', slackDefaultTo: slack.slackDefaultTo });
+      setNote('保存しました');
+      void refresh();
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : '保存に失敗しました');
+    }
+  };
+
+  return (
+    <>
+      <h2 className="section">外部サービス連携</h2>
+
+      <div className="card">
+        <div className="row">
+          <div className="grow">
+            <h3>Google (カレンダー・Gmail・連絡先)</h3>
+            <div className={`conn-status ${google?.connected ? 'on' : 'off'}`}>
+              {google?.connected ? `接続済み ${google.email ?? ''}` : '未接続'}
+            </div>
+          </div>
+          {google?.connected && (
+            <button
+              className="btn sm danger"
+              onClick={() => api.post('/google/disconnect').then(refresh)}
+            >
+              解除
+            </button>
+          )}
+        </div>
+        {!google?.connected && (
+          <>
+            <div className="meta" style={{ marginTop: 8 }}>
+              Google Cloud ConsoleでOAuthクライアント(ウェブアプリ)を作り、IDとシークレットを入力してください。
+              リダイレクトURIは下のURLをそのまま登録します。
+            </div>
+            <div className="message-body" style={{ fontSize: 12.5 }}>{`${location.origin}/api/google/callback`}</div>
+            <label className="field" style={{ marginTop: 8 }}>
+              <span>クライアントID</span>
+              <input
+                value={creds.clientId}
+                onChange={(e) => setCreds({ ...creds, clientId: e.target.value })}
+                placeholder="xxxxx.apps.googleusercontent.com"
+              />
+            </label>
+            <label className="field">
+              <span>クライアントシークレット</span>
+              <input
+                type="password"
+                value={creds.clientSecret}
+                onChange={(e) => setCreds({ ...creds, clientSecret: e.target.value })}
+              />
+            </label>
+            <button className="btn sm" onClick={() => void connectGoogle()}>
+              Googleと連携する
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <h3>
+          LINE <span className={`conn-status ${msg?.line ? 'on' : 'off'}`}>{msg?.line ? '接続済み' : '未接続'}</span>
+        </h3>
+        <div className="meta">
+          LINE Developersで Messaging API チャネルを作り、チャネルアクセストークンを入力します。
+        </div>
+        <label className="field" style={{ marginTop: 8 }}>
+          <span>チャネルアクセストークン{msg?.line ? ' (変更する場合のみ)' : ''}</span>
+          <input
+            type="password"
+            value={line.lineToken}
+            onChange={(e) => setLine({ ...line, lineToken: e.target.value })}
+          />
+        </label>
+        <label className="field">
+          <span>既定の送信先 (自分のuserId)</span>
+          <input
+            value={line.lineDefaultTo}
+            onChange={(e) => setLine({ ...line, lineDefaultTo: e.target.value })}
+            placeholder="Uxxxxxxxx"
+          />
+        </label>
+        <div className="row">
+          <button
+            className="btn sm"
+            onClick={() =>
+              void saveMessaging(
+                line.lineToken ? line : { lineDefaultTo: line.lineDefaultTo },
+              )
+            }
+          >
+            保存
+          </button>
+          {msg?.line && (
+            <button className="btn sm danger" onClick={() => void saveMessaging({ lineToken: '' })}>
+              解除
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>
+          Slack <span className={`conn-status ${msg?.slack ? 'on' : 'off'}`}>{msg?.slack ? '接続済み' : '未接続'}</span>
+        </h3>
+        <div className="meta">Slack Appを作り、Bot User OAuth Token (xoxb-) を入力します。</div>
+        <label className="field" style={{ marginTop: 8 }}>
+          <span>Bot Token{msg?.slack ? ' (変更する場合のみ)' : ''}</span>
+          <input
+            type="password"
+            value={slack.slackToken}
+            onChange={(e) => setSlack({ ...slack, slackToken: e.target.value })}
+            placeholder="xoxb-..."
+          />
+        </label>
+        <label className="field">
+          <span>既定の送信先チャンネル</span>
+          <input
+            value={slack.slackDefaultTo || (msg?.slackDefaultTo ?? '')}
+            onChange={(e) => setSlack({ ...slack, slackDefaultTo: e.target.value })}
+            placeholder="#general"
+          />
+        </label>
+        <div className="row">
+          <button
+            className="btn sm"
+            onClick={() =>
+              void saveMessaging(
+                slack.slackToken ? slack : { slackDefaultTo: slack.slackDefaultTo },
+              )
+            }
+          >
+            保存
+          </button>
+          {msg?.slack && (
+            <button className="btn sm danger" onClick={() => void saveMessaging({ slackToken: '' })}>
+              解除
+            </button>
+          )}
+        </div>
+      </div>
+
+      {note && <div className="meta">{note}</div>}
+    </>
+  );
+}
+
 function DeviceRowEditor({ device, onChanged }: { device: DeviceRow; onChanged: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(device.name);
@@ -733,6 +960,8 @@ export function SettingsView() {
           ['free', 'AI操作可能'],
         ])}
       </div>
+
+      <ConnectionsSection />
 
       <h2 className="section">権限 (Permissions)</h2>
       <div className="card">

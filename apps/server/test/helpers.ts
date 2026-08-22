@@ -9,6 +9,7 @@ import type { HomeAssistantClient, HaState } from '../src/ha/client.js';
 import type { AgentGateway } from '../src/agentGateway.js';
 import type { PushService } from '../src/push.js';
 import type { GoogleAuth } from '../src/google/oauth.js';
+import { MessagingService } from '../src/messaging/channels.js';
 
 export class FakeHa {
   states = new Map<string, HaState>();
@@ -58,6 +59,7 @@ export interface TestEnv {
   permissions: PermissionService;
   registry: ReturnType<typeof createRegistry>;
   googleAuth: GoogleAuth;
+  messaging: MessagingService;
   ha: FakeHa;
   notifications: Array<{ level: string; title: string }>;
   ctx: ToolContext;
@@ -102,11 +104,14 @@ export function makeTestEnv(): TestEnv {
     },
   } as unknown as GoogleAuth;
 
+  const messaging = new MessagingService(db, userId);
+
   const ctx: ToolContext = {
     db,
     userId,
     source: 'web',
     googleAuth,
+    messaging,
     ha: ha as unknown as HomeAssistantClient,
     gateway,
     push,
@@ -115,7 +120,7 @@ export function makeTestEnv(): TestEnv {
     permissions,
   };
 
-  return { db, userId, settings, memory, permissions, registry, ha, notifications, ctx, googleAuth };
+  return { db, userId, settings, memory, permissions, registry, ha, notifications, ctx, googleAuth, messaging };
 }
 
 export const TEST_DEVICES = [

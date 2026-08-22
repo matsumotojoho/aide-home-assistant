@@ -14,7 +14,8 @@ import {
   webFetch,
 } from './core.js';
 import { macExecute, macStatus, browserOpen, codexRun } from './mac.js';
-import { messagePrepare, messageSend, webSearch } from './stubs.js';
+import { webSearch } from './stubs.js';
+import { createMessagingTools } from '../messaging/tools.js';
 import { createGoogleTools } from '../google/tools.js';
 
 export { ToolRegistry } from './registry.js';
@@ -24,6 +25,7 @@ export function createRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   const all = [
     ...createGoogleTools((ctx) => ctx.googleAuth),
+    ...createMessagingTools((ctx) => ctx.messaging),
     homeGetState,
     homeExecute,
     memorySearch,
@@ -34,8 +36,6 @@ export function createRegistry(): ToolRegistry {
     tasksUpdate,
     tasksCancel,
     tasksList,
-    messagePrepare,
-    messageSend,
     webSearch,
     webFetch,
     macExecute,

@@ -27,6 +27,7 @@ import type { AgentGateway } from '../agentGateway.js';
 import { applyUndo } from '../undo.js';
 import { categorize } from '../risk.js';
 import type { GoogleAuth } from '../google/oauth.js';
+import type { MessagingService } from '../messaging/channels.js';
 
 export interface ApiDeps {
   db: Db;
@@ -41,6 +42,7 @@ export interface ApiDeps {
   ha: HomeAssistantClient;
   gateway: AgentGateway;
   googleAuth: GoogleAuth;
+  messaging: MessagingService;
   buildToolContext: (source: ToolContext['source']) => ToolContext;
 }
 
@@ -411,6 +413,27 @@ export function createApi(deps: ApiDeps): Hono {
   api.post('/google/disconnect', (c) => {
     deps.googleAuth.disconnect();
     return c.json({ ok: true });
+  });
+
+  // ---------- メッセージ連携 (LINE / Slack) ----------
+  api.get('/messaging/status', (c) => {
+    const config = deps.messaging.getConfig();
+    return c.json({
+      ...deps.messaging.status(),
+      lineDefaultTo: config.lineDefaultTo ? '設定済み' : '',
+      slackDefaultTo: config.slackDefaultTo ?? '',
+    });
+  });
+
+  api.post('/messaging/config', async (c) => {
+    const body = await c.req.json<Record<string, string>>();
+    // 空文字は「変更しない」ではなく「クリア」として扱えるよう、キーの有無で判定する
+    const patch: Record<string, string> = {};
+    for (const key of ['lineToken', 'lineDefaultTo', 'slackToken', 'slackDefaultTo']) {
+      if (key in body) patch[key] = String(body[key] ?? '').trim();
+    }
+    deps.messaging.setConfig(patch);
+    return c.json({ ok: true, ...deps.messaging.status() });
   });
 
   // ---------- status / agent ----------

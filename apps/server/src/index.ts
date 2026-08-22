@@ -28,6 +28,7 @@ import { Scheduler } from './scheduler.js';
 import { createApi } from './routes/api.js';
 import { createAlexaApp } from './alexa/skill.js';
 import { GoogleAuth } from './google/oauth.js';
+import { MessagingService } from './messaging/channels.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -66,6 +67,8 @@ async function main(): Promise<void> {
 
   const googleAuth = new GoogleAuth(db, userId, `${config.publicUrl}/api/google/callback`);
 
+  const messaging = new MessagingService(db, userId);
+
   const registry = createRegistry();
   const providerSelector = createProviderSelector({
     settings,
@@ -78,6 +81,7 @@ async function main(): Promise<void> {
     userId,
     source,
     googleAuth,
+    messaging,
     ha,
     gateway,
     push,
@@ -107,6 +111,7 @@ async function main(): Promise<void> {
       ha,
       gateway,
       googleAuth,
+      messaging,
       buildToolContext,
     }),
   );

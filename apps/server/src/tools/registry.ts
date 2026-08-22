@@ -12,11 +12,14 @@ import type { SettingsService } from '../services/settings.js';
 import type { MemoryService } from '../services/memory.js';
 import type { PermissionService } from '../services/permissions.js';
 import type { GoogleAuth } from '../google/oauth.js';
+import type { MessagingService } from '../messaging/channels.js';
 
 export interface ToolContext {
   db: Db;
   /** Google連携 (Phase 3)。未接続でもツールは存在し、その旨を返す */
   googleAuth: GoogleAuth;
+  /** LINE/Slack送信 (Phase 3) */
+  messaging: MessagingService;
   userId: string;
   source: 'alexa' | 'web' | 'mobile' | 'scheduled';
   ha: HomeAssistantClient;
@@ -239,12 +242,15 @@ function approvalTitle(
     const label = kind === 'open_app' ? 'アプリを起動' : kind === 'applescript' ? 'Mac操作' : 'コマンド実行';
     return `Macで${label}: ${command.slice(0, 80)}`;
   }
-  if (tool === 'message.send' || tool === 'message.prepare') {
-    const to = String((input as { to?: string }).to ?? '相手');
-    return `${to}へメッセージを送信します`;
+  if (tool === 'message.send') {
+    const i = input as { recipient_name?: string; to?: string; channel?: string };
+    const who = i.recipient_name ?? i.to ?? '相手';
+    const via = i.channel === 'line' ? 'LINE' : i.channel === 'slack' ? 'Slack' : String(i.channel ?? '');
+    return `${who}へ${via}でメッセージを送信します`;
   }
   if (tool === 'mail.send') {
-    return 'メールを送信します';
+    const i = input as { to?: string; subject?: string };
+    return `${i.to ?? ''} へメールを送信します「${String(i.subject ?? '').slice(0, 40)}」`;
   }
   return `${tool} を実行します (${category})`;
 }

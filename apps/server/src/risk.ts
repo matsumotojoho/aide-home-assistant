@@ -49,8 +49,9 @@ export function categorize(tool: string, input: Record<string, unknown>): RiskCa
     case 'mail.send':
       return 'mail_send';
     case 'message.send':
-    case 'message.prepare':
       return 'messaging_send';
+    case 'message.channels':
+      return 'system';
     case 'mac.execute': {
       const cmd = String((input as { command?: string }).command ?? '');
       if (DESTRUCTIVE_SHELL_PATTERNS.test(cmd)) return 'destructive';
