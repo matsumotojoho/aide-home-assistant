@@ -59,7 +59,8 @@ function defaultVerify(certUrl: string, signature: string, body: string): Promis
 // Alexaは呼び出し名を含んだ発話をそのままスロットに入れてくることがある。
 // 例: 「えーあいでリビングの電気つけて」→ query="えーあいでリビングの電気つけて"
 // このままRouterへ渡すと部屋やデバイスの判定を邪魔するため、前置きを取り除く。
-const INVOCATION_ALIASES = ['えーあい', 'エーアイ', 'ええあい', 'えあい', 'AI', 'ai'];
+// 呼び出し名を変えたらここも更新する (ops/alexa/interaction-model.json の invocationName)
+const INVOCATION_ALIASES = ['エージェント', 'えーじぇんと', 'エージェンt', 'agent'];
 // 呼び出し名の直後に来る助詞
 const PARTICLE_RE = /^(で|に|を|の|、|,|\s)+/;
 // 「開いて」等しか残らなければ、それは起動要求であって用件ではない

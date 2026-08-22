@@ -186,11 +186,11 @@ describe('Alexa応答長 (alexa.verbosity)', () => {
 describe('呼び出し名が混ざった発話の正規化 (実機で発覚)', () => {
   it('呼び出し名+助詞を取り除く', async () => {
     const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
-    expect(normalizeAlexaQuery('えーあいでリビングの電気つけて')).toEqual({
+    expect(normalizeAlexaQuery('エージェントでリビングの電気つけて')).toEqual({
       query: 'リビングの電気つけて',
       isLaunch: false,
     });
-    expect(normalizeAlexaQuery('エーアイに寝室のエアコン26度にして')).toEqual({
+    expect(normalizeAlexaQuery('えーじぇんとに寝室のエアコン26度にして')).toEqual({
       query: '寝室のエアコン26度にして',
       isLaunch: false,
     });
@@ -198,7 +198,7 @@ describe('呼び出し名が混ざった発話の正規化 (実機で発覚)', (
 
   it('起動だけの発話はisLaunchになる (Claudeを呼ばない)', async () => {
     const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
-    for (const phrase of ['えーあいを開いて', 'えーあい', 'エーアイを起動して', 'えーあいひらいて']) {
+    for (const phrase of ['エージェントを開いて', 'エージェント', 'えーじぇんとを起動して', 'エージェントひらいて']) {
       expect(normalizeAlexaQuery(phrase).isLaunch, phrase).toBe(true);
     }
   });
@@ -214,7 +214,7 @@ describe('呼び出し名が混ざった発話の正規化 (実機で発覚)', (
   it('デバイス名に呼び出し名が紛れても本文を壊さない', async () => {
     const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
     // 先頭以外の一致は削らない
-    expect(normalizeAlexaQuery('今日のえーあいの調子はどう').query).toBe('今日のえーあいの調子はどう');
+    expect(normalizeAlexaQuery('今日のエージェントの調子はどう').query).toBe('今日のエージェントの調子はどう');
   });
 
   it('起動だけの発話にはClaudeを使わず即答する', async () => {
@@ -236,7 +236,7 @@ describe('呼び出し名が混ざった発話の正規化 (実機で発覚)', (
       body: JSON.stringify(
         alexaRequest({
           type: 'IntentRequest',
-          intent: { name: 'CatchAllIntent', slots: { query: { name: 'query', value: 'えーあいを開いて' } } },
+          intent: { name: 'CatchAllIntent', slots: { query: { name: 'query', value: 'エージェントを開いて' } } },
         }),
       ),
       headers: { signaturecertchainurl: 'https://s3.amazonaws.com/echo.api/c', 'signature-256': 'x' },
