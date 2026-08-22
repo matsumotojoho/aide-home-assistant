@@ -45,30 +45,6 @@ function stub(
 
 const anyObj = z.record(z.unknown());
 
-export const calendarRead = stub(
-  'calendar.read',
-  'カレンダーの予定を取得する',
-  '{"from":"2026-08-20","to":"2026-08-21"}',
-  anyObj,
-  'google_calendar',
-);
-export const calendarCreate = stub(
-  'calendar.create',
-  'カレンダーに予定を作成する',
-  '{"title":"...","start":"...","end":"..."}',
-  anyObj,
-  'google_calendar',
-);
-export const calendarUpdate = stub('calendar.update', '予定を変更する', '{"id":"...", ...}', anyObj, 'google_calendar');
-export const calendarDelete = stub('calendar.delete', '予定を削除する', '{"id":"..."}', anyObj, 'google_calendar');
-
-export const mailSearch = stub('mail.search', 'メールを検索する', '{"query":"..."}', anyObj, 'gmail');
-export const mailRead = stub('mail.read', 'メールを読む', '{"id":"..."}', anyObj, 'gmail');
-export const mailDraft = stub('mail.draft', 'メール下書きを作成する', '{"to":"...","subject":"...","body":"..."}', anyObj, 'gmail');
-export const mailSend = stub('mail.send', 'メールを送信する (送信前にユーザー承認必須)', '{"draft_id":"..."}', anyObj, 'gmail');
-
-export const contactsSearch = stub('contacts.search', '連絡先を検索する', '{"name":"田中"}', anyObj, 'contacts');
-
 export const messagePrepare = stub(
   'message.prepare',
   '送信メッセージ案を作成しスマホ承認へ回す (LINE/Slack等)',

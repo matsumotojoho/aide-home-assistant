@@ -8,6 +8,7 @@ import { createRegistry, type ToolContext } from '../src/tools/index.js';
 import type { HomeAssistantClient, HaState } from '../src/ha/client.js';
 import type { AgentGateway } from '../src/agentGateway.js';
 import type { PushService } from '../src/push.js';
+import type { GoogleAuth } from '../src/google/oauth.js';
 
 export class FakeHa {
   states = new Map<string, HaState>();
@@ -56,6 +57,7 @@ export interface TestEnv {
   memory: MemoryService;
   permissions: PermissionService;
   registry: ReturnType<typeof createRegistry>;
+  googleAuth: GoogleAuth;
   ha: FakeHa;
   notifications: Array<{ level: string; title: string }>;
   ctx: ToolContext;
@@ -91,10 +93,20 @@ export function makeTestEnv(): TestEnv {
     },
   } as unknown as PushService;
 
+  // 既定は未接続 (Googleツールは「未接続」と返す)
+  const googleAuth = {
+    connected: () => false,
+    status: () => ({ connected: false }),
+    api: async () => {
+      throw new Error('not connected');
+    },
+  } as unknown as GoogleAuth;
+
   const ctx: ToolContext = {
     db,
     userId,
     source: 'web',
+    googleAuth,
     ha: ha as unknown as HomeAssistantClient,
     gateway,
     push,
@@ -103,7 +115,7 @@ export function makeTestEnv(): TestEnv {
     permissions,
   };
 
-  return { db, userId, settings, memory, permissions, registry, ha, notifications, ctx };
+  return { db, userId, settings, memory, permissions, registry, ha, notifications, ctx, googleAuth };
 }
 
 export const TEST_DEVICES = [

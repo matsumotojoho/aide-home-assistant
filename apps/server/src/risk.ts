@@ -59,6 +59,11 @@ export function categorize(tool: string, input: Record<string, unknown>): RiskCa
     }
     case 'mac.status':
       return 'system';
+    case 'browser.open':
+      return 'web';
+    case 'codex.run':
+      // ファイル書き換えを伴うため、shell実行と同じ扱いにする
+      return 'mac_shell';
     case 'notification.send':
       return 'notification';
     case 'web.fetch':

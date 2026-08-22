@@ -13,21 +13,9 @@ import {
   systemGetContext,
   webFetch,
 } from './core.js';
-import { macExecute, macStatus } from './mac.js';
-import {
-  calendarRead,
-  calendarCreate,
-  calendarUpdate,
-  calendarDelete,
-  mailSearch,
-  mailRead,
-  mailDraft,
-  mailSend,
-  contactsSearch,
-  messagePrepare,
-  messageSend,
-  webSearch,
-} from './stubs.js';
+import { macExecute, macStatus, browserOpen, codexRun } from './mac.js';
+import { messagePrepare, messageSend, webSearch } from './stubs.js';
+import { createGoogleTools } from '../google/tools.js';
 
 export { ToolRegistry } from './registry.js';
 export type { ToolContext, ToolDef, ExecuteOptions } from './registry.js';
@@ -35,6 +23,7 @@ export type { ToolContext, ToolDef, ExecuteOptions } from './registry.js';
 export function createRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   const all = [
+    ...createGoogleTools((ctx) => ctx.googleAuth),
     homeGetState,
     homeExecute,
     memorySearch,
@@ -45,21 +34,14 @@ export function createRegistry(): ToolRegistry {
     tasksUpdate,
     tasksCancel,
     tasksList,
-    calendarRead,
-    calendarCreate,
-    calendarUpdate,
-    calendarDelete,
-    mailSearch,
-    mailRead,
-    mailDraft,
-    mailSend,
-    contactsSearch,
     messagePrepare,
     messageSend,
     webSearch,
     webFetch,
     macExecute,
     macStatus,
+    browserOpen,
+    codexRun,
     notificationSend,
     systemGetContext,
   ];

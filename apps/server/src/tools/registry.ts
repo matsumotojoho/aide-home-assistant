@@ -11,9 +11,12 @@ import type { PushService } from '../push.js';
 import type { SettingsService } from '../services/settings.js';
 import type { MemoryService } from '../services/memory.js';
 import type { PermissionService } from '../services/permissions.js';
+import type { GoogleAuth } from '../google/oauth.js';
 
 export interface ToolContext {
   db: Db;
+  /** Google連携 (Phase 3)。未接続でもツールは存在し、その旨を返す */
+  googleAuth: GoogleAuth;
   userId: string;
   source: 'alexa' | 'web' | 'mobile' | 'scheduled';
   ha: HomeAssistantClient;

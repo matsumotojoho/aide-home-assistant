@@ -149,7 +149,8 @@ export type AgentRpcMethod =
   | 'llm.complete'
   | 'ha.request'
   | 'agent.set_mode'
-  | 'codex.run';
+  | 'codex.run'
+  | 'browser.open';
 
 export interface AgentRpcRequest {
   type: 'rpc';

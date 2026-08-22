@@ -12,6 +12,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import type { AgentMessage, AgentRpcRequest, MacExecuteParams, LlmCompleteParams } from '@aide/shared';
+import { browseUrl, closeBrowser, runScript } from './browser.js';
 
 loadEnv();
 loadEnv({ path: join(process.env.HOME ?? '~', '.aide', 'agent.env') });
@@ -104,7 +105,8 @@ const guiQueue: Array<{ params: MacExecuteParams; queuedAt: number }> = [];
 
 async function macExecute(params: MacExecuteParams, allowQueue = true): Promise<ExecResult> {
   const timeoutMs = params.timeoutMs ?? 60_000;
-  if (params.gui && allowQueue) {
+  // playwrightはheadlessで画面を奪わないため、GUI扱いにしない
+  if (params.gui && params.kind !== 'playwright' && allowQueue) {
     const { busy, mode } = await isHumanBusy();
     if (busy) {
       guiQueue.push({ params, queuedAt: Date.now() });
@@ -118,6 +120,15 @@ async function macExecute(params: MacExecuteParams, allowQueue = true): Promise<
       return runCommand('osascript', ['-e', params.command], null, timeoutMs);
     case 'open_app':
       return runCommand('open', ['-a', params.command], null, timeoutMs);
+    case 'playwright': {
+      // headlessなので人間のGUIを奪わない → キュー不要
+      try {
+        const result = await runScript(params.command, timeoutMs);
+        return { status: 'done', stdout: JSON.stringify(result), exitCode: 0 };
+      } catch (err) {
+        return { status: 'done', stderr: err instanceof Error ? err.message : String(err), exitCode: 1 };
+      }
+    }
   }
 }
 
@@ -193,6 +204,21 @@ async function haRequest(params: { method: string; path: string; body?: unknown 
   }
 }
 
+// ---------- Codex CLI ブリッジ (Phase 4) ----------
+// ランタイムの頭脳はClaude。開発作業やリポジトリ操作をCodexへ委譲したい場合に使う。
+// codexが未インストールなら明示的にその旨を返す (勝手に導入しない)。
+
+async function runCodex(params: { prompt: string; cwd?: string; timeoutMs?: number }): Promise<ExecResult> {
+  const probe = await runCommand('/bin/zsh', ['-lc', 'command -v codex'], null, 5000);
+  if ((probe.exitCode ?? 1) !== 0) {
+    return { status: 'done', stderr: 'Codex CLIがインストールされていません', exitCode: 127 };
+  }
+  const cwd = params.cwd ? `cd ${JSON.stringify(params.cwd)} && ` : '';
+  // 非対話モードで実行 (承認プロンプトで固まらないようにする)
+  const cmd = `${cwd}codex exec ${JSON.stringify(params.prompt)}`;
+  return runCommand('/bin/zsh', ['-lc', cmd], null, params.timeoutMs ?? 300_000);
+}
+
 // ---------- WebSocket接続 ----------
 
 let ws: WebSocket | null = null;
@@ -205,7 +231,7 @@ function connect(): void {
   ws.on('open', () => {
     reconnectDelay = 1000;
     console.log('[ws] 接続完了');
-    send({ type: 'hello', agent: 'mac', version: VERSION, capabilities: ['mac.execute', 'llm.complete', 'ha.request'] });
+    send({ type: 'hello', agent: 'mac', version: VERSION, capabilities: ['mac.execute', 'llm.complete', 'ha.request', 'browser.open', 'codex.run'] });
     void pushStatus();
   });
 
@@ -256,6 +282,14 @@ async function handleRpc(req: AgentRpcRequest): Promise<void> {
       case 'ha.request':
         result = await haRequest(req.params as { method: string; path: string; body?: unknown });
         break;
+      case 'browser.open': {
+        const p = req.params as { url: string; screenshot?: boolean; waitFor?: string };
+        result = await browseUrl(p.url, { screenshot: p.screenshot, waitFor: p.waitFor });
+        break;
+      }
+      case 'codex.run':
+        result = await runCodex(req.params as { prompt: string; cwd?: string; timeoutMs?: number });
+        break;
       case 'agent.set_mode': {
         const mode = String(req.params.mode);
         if (mode === 'auto' || mode === 'busy' || mode === 'free') {
@@ -283,6 +317,10 @@ async function pushStatus(): Promise<void> {
 setInterval(() => send({ type: 'ping' }), 30_000);
 setInterval(() => void pushStatus(), 20_000);
 setInterval(() => void drainGuiQueue(), 30_000);
+
+process.on('SIGTERM', () => {
+  void closeBrowser().finally(() => process.exit(0));
+});
 
 console.log(`Aide Mac Agent v${VERSION} (mode file: ${MODE_FILE})`);
 connect();

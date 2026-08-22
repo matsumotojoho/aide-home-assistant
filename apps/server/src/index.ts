@@ -6,6 +6,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync } from 'node:fs';
 import { Hono } from 'hono';
+import { getCookie, deleteCookie } from 'hono/cookie';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { v4 as uuid } from 'uuid';
@@ -26,6 +27,7 @@ import { Orchestrator } from './orchestrator.js';
 import { Scheduler } from './scheduler.js';
 import { createApi } from './routes/api.js';
 import { createAlexaApp } from './alexa/skill.js';
+import { GoogleAuth } from './google/oauth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -62,6 +64,8 @@ async function main(): Promise<void> {
     };
   });
 
+  const googleAuth = new GoogleAuth(db, userId, `${config.publicUrl}/api/google/callback`);
+
   const registry = createRegistry();
   const providerSelector = createProviderSelector({
     settings,
@@ -73,6 +77,7 @@ async function main(): Promise<void> {
     db,
     userId,
     source,
+    googleAuth,
     ha,
     gateway,
     push,
@@ -101,9 +106,34 @@ async function main(): Promise<void> {
       permissions,
       ha,
       gateway,
+      googleAuth,
       buildToolContext,
     }),
   );
+
+  // Google OAuthコールバック (Googleからのリダイレクトを受けるため /api の認証ゾーン外)
+  app.get('/api/google/callback', async (c) => {
+    const code = c.req.query('code');
+    const state = c.req.query('state');
+    const expected = getCookie(c, 'google_oauth_state');
+    const html = (msg: string) =>
+      c.html(
+        `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+          `<body style="font-family:-apple-system,sans-serif;padding:40px;text-align:center">` +
+          `<p>${msg}</p><p><a href="/">Aideへ戻る</a></p></body>`,
+      );
+    if (!code || !state || state !== expected) {
+      return html('連携に失敗しました (リクエストが不正です)。もう一度お試しください。');
+    }
+    deleteCookie(c, 'google_oauth_state', { path: '/' });
+    try {
+      await googleAuth.exchangeCode(code);
+      return html('Googleと連携しました。');
+    } catch (err) {
+      console.error('[google] コード交換失敗:', err);
+      return html('連携に失敗しました。設定をやり直してください。');
+    }
+  });
 
   // Alexa Custom Skill (Phase 2)。/api配下ではなくトップレベル (セッション認証でなく署名検証)
   app.route(

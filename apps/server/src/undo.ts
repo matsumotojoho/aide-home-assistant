@@ -2,12 +2,14 @@ import { eq } from 'drizzle-orm';
 import type { Db } from './db/index.js';
 import { actions, undoRecords } from './db/schema.js';
 import type { HomeAssistantClient } from './ha/client.js';
+import type { GoogleAuth } from './google/oauth.js';
 
 /** actions.undo_record_id を辿って直前状態へ復元する */
 export async function applyUndo(
   db: Db,
   ha: HomeAssistantClient,
   actionId: string,
+  googleAuth?: GoogleAuth,
 ): Promise<{ ok: boolean; message: string }> {
   const action = db.select().from(actions).where(eq(actions.id, actionId)).get();
   if (!action) return { ok: false, message: '対象の操作が見つかりません' };
@@ -39,6 +41,20 @@ export async function applyUndo(
     if (failures.length > 0) {
       db.update(undoRecords).set({ usedAt: new Date().toISOString() }).where(eq(undoRecords.id, record.id)).run();
       return { ok: true, message: `一部の機器は戻せませんでした (${failures.length}台)` };
+    }
+  } else if (record.kind === 'calendar_event') {
+    // 作成した予定を消すことで取り消す
+    const eventId = String(restore.eventId ?? '');
+    if (!eventId || !googleAuth) {
+      return { ok: false, message: 'カレンダー連携が無効なため元に戻せませんでした' };
+    }
+    try {
+      await googleAuth.api(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`,
+        { method: 'DELETE' },
+      );
+    } catch {
+      return { ok: false, message: '予定の削除に失敗しました' };
     }
   } else if (record.kind === 'memory') {
     return { ok: false, message: 'メモリのUndoは未対応です (Memoryタブから編集してください)' };

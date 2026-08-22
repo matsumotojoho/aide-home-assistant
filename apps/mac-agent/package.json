@@ -11,6 +11,7 @@
   "dependencies": {
     "@aide/shared": "*",
     "dotenv": "^16.4.7",
+    "playwright": "^1.62.1",
     "tsx": "^4.19.2",
     "ws": "^8.18.0"
   },

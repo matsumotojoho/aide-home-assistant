@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
 import { desc, eq, and } from 'drizzle-orm';
 import { v4 as uuid } from 'uuid';
 import { z } from 'zod';
@@ -25,6 +26,7 @@ import type { HomeAssistantClient } from '../ha/client.js';
 import type { AgentGateway } from '../agentGateway.js';
 import { applyUndo } from '../undo.js';
 import { categorize } from '../risk.js';
+import type { GoogleAuth } from '../google/oauth.js';
 
 export interface ApiDeps {
   db: Db;
@@ -38,6 +40,7 @@ export interface ApiDeps {
   permissions: PermissionService;
   ha: HomeAssistantClient;
   gateway: AgentGateway;
+  googleAuth: GoogleAuth;
   buildToolContext: (source: ToolContext['source']) => ToolContext;
 }
 
@@ -250,7 +253,7 @@ export function createApi(deps: ApiDeps): Hono {
   });
 
   api.post('/actions/:id/undo', async (c) => {
-    const result = await applyUndo(db, deps.ha, c.req.param('id'));
+    const result = await applyUndo(db, deps.ha, c.req.param('id'), deps.googleAuth);
     return c.json(result, result.ok ? 200 : 400);
   });
 
@@ -375,6 +378,38 @@ export function createApi(deps: ApiDeps): Hono {
     const sub = await c.req.json<{ endpoint?: string; keys?: unknown }>();
     if (!sub.endpoint || !sub.keys) return c.json({ error: 'invalid subscription' }, 400);
     deps.push.saveSubscription(userId, { endpoint: sub.endpoint, keys: sub.keys });
+    return c.json({ ok: true });
+  });
+
+  // ---------- Google連携 (Phase 3) ----------
+  api.get('/google/status', (c) => c.json(deps.googleAuth.status()));
+
+  api.post('/google/credentials', async (c) => {
+    const body = await c.req.json<{ clientId?: string; clientSecret?: string }>();
+    if (!body.clientId || !body.clientSecret) {
+      return c.json({ error: 'クライアントIDとシークレットが必要です' }, 400);
+    }
+    deps.googleAuth.setCredentials(body.clientId.trim(), body.clientSecret.trim());
+    return c.json({ ok: true });
+  });
+
+  api.get('/google/auth-url', (c) => {
+    // stateはCSRF対策。Cookieに入れてcallbackで照合する
+    const state = uuid();
+    setCookie(c, 'google_oauth_state', state, {
+      httpOnly: true,
+      secure: c.req.url.startsWith('https'),
+      sameSite: 'Lax',
+      path: '/',
+      maxAge: 600,
+    });
+    const url = deps.googleAuth.authUrl(state);
+    if (!url) return c.json({ error: '先にクライアントIDとシークレットを設定してください' }, 400);
+    return c.json({ url });
+  });
+
+  api.post('/google/disconnect', (c) => {
+    deps.googleAuth.disconnect();
     return c.json({ ok: true });
   });
 
