@@ -24,7 +24,9 @@
 4. **Endpoint** を設定
    - Endpoint → **HTTPS**
    - Default Region: `https://aide-server-production-49d1.up.railway.app/alexa`
-   - SSL証明書の種別: **信頼された認証局から発行された証明書を使用しています**
+   - SSL証明書の種別: **サブドメインのワイルドカード証明書** を選ぶ
+     (Railwayは `*.up.railway.app` のワイルドカード証明書。「信頼された認証局〜」を選ぶと
+      AlexaがTLS検証で接続を拒否し、リクエストがサーバーに一切届かない)
 
 5. **Test** タブで Development を有効化し、実機で確認
 
@@ -55,3 +57,24 @@
 - 無応答が約8秒続くとセッションが切れる (再開は「アレクサ、マイアシスタントを開いて」)
 - 「アレクサ、電気つけて」のようなAlexa標準のスマートホーム操作は、
   そのままAlexa側に任せた方が速い (無理にAI経由にしない方針)
+
+
+## 実機検証で判明した落とし穴
+
+1. **SSL証明書の種別**
+   Railwayは `*.up.railway.app` のワイルドカード証明書。`Trusted` を選ぶとAlexaが接続せず、
+   サーバーにログすら残らない。`Wildcard` を選ぶこと。
+
+2. **署名ヘッダーはSHA-256側を使う**
+   Alexaは `signature` (SHA-1) と `signature-256` (SHA-256) の両方を送る。
+   検証はRSA-SHA256で行うため `signature-256` を使う。SHA-1側を渡すと必ず
+   `invalid signature` になる。証明書URLのヘッダーは `signaturecertchainurl` (ハイフン無し)。
+
+3. **AMAZON.SearchQuery はスロット単体の発話を許さない**
+   `"{query}"` だけのサンプルは `MissingCarrierPhraseWithPhraseSlot` でビルドに失敗する。
+   自由発話を丸ごと受けたいので、カスタムスロット型 (`QueryType`) に代表的な発話を並べる方式にした。
+   カスタムスロットは一覧に無い値もそのまま渡ってくる。
+
+4. **distributionMode は PUBLIC のまま**
+   `PRIVATE` はAlexa for Business向けの配布方式。自分専用でも、審査に出さずDevelopmentで
+   使うぶんにはPUBLICでよい。

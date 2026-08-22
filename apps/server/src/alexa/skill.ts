@@ -84,14 +84,19 @@ export function createAlexaApp(deps: AlexaDeps): Hono {
   app.post('/', async (c) => {
     // 署名検証は必ず生のボディに対して行う
     const rawBody = await c.req.text();
-    // Alexaのヘッダーは Signature-Cert-Chain-Url / Signature (ハイフン区切り)。
-    // 旧SDK互換で SignatureCertChainUrl を送る経路もあるため両方受ける。
+    // 実機で確認したAlexaのヘッダー: signaturecertchainurl / signature / signature-256
+    //  - 証明書URLはハイフン無しの signaturecertchainurl (ハイフン付きも一応受ける)
+    //  - signature は旧来のSHA-1、signature-256 がSHA-256。
+    //    検証はRSA-SHA256で行うため signature-256 を優先する
+    //    (SHA-1側を渡すと必ず invalid signature になる)
     const certUrl =
-      c.req.header('signature-cert-chain-url') ?? c.req.header('signaturecertchainurl') ?? '';
-    const signature = c.req.header('signature') ?? '';
+      c.req.header('signaturecertchainurl') ?? c.req.header('signature-cert-chain-url') ?? '';
+    const signature = c.req.header('signature-256') ?? c.req.header('signature') ?? '';
     // 到達したことを必ず残す (届いていないのか、弾いているのかを切り分けるため)
     console.log(
-      `[alexa] 受信 body=${rawBody.length}B cert=${certUrl ? 'あり' : 'なし'} sig=${signature ? 'あり' : 'なし'}`,
+      `[alexa] 受信 body=${rawBody.length}B cert=${certUrl ? 'あり' : 'なし'} sig=${
+        c.req.header('signature-256') ? 'sha256' : c.req.header('signature') ? 'sha1のみ' : 'なし'
+      }`,
     );
     try {
       await verify(certUrl, signature, rawBody);

@@ -51,8 +51,8 @@ async function post(app: ReturnType<typeof makeApp>, body: unknown) {
   const res = await app.request('/', {
     method: 'POST',
     body: JSON.stringify(body),
-    // 実際にAlexaが送るヘッダー名 (ハイフン区切り)
-    headers: { 'Signature-Cert-Chain-Url': 'https://s3.amazonaws.com/echo.api/cert', Signature: 'x' },
+    // 実機で確認したヘッダー名
+    headers: { signaturecertchainurl: 'https://s3.amazonaws.com/echo.api/cert', 'signature-256': 'x' },
   });
   return { status: res.status, json: (await res.json()) as Record<string, unknown> };
 }
@@ -72,25 +72,46 @@ describe('Alexa Skill エンドポイント', () => {
     expect(status).toBe(400);
   });
 
-  it('Alexaが実際に送るヘッダー名 (Signature-Cert-Chain-Url) を読める', async () => {
-    // 本番で発覚: ハイフン無しの名前で読んでいて全リクエストが弾かれていた
+  it('SHA-256の署名ヘッダーを使う (SHA-1を渡すと検証が必ず失敗する)', async () => {
+    // 本番で発覚: 検証はRSA-SHA256なのに旧来のsignature(SHA-1)を渡していた
     const seen: Array<{ certUrl: string; signature: string }> = [];
-    const app = createAlexaApp({
-      orchestrator: { handleUserMessage: async () => ({ reply: 'ok', conversationId: 'c', intent: 'consult' as const, pendingApprovalIds: [] }) } as never,
-      settings: { get: () => 'standard' } as never,
-      push: { notify: async () => undefined } as never,
-      userId: 'u1',
-      verify: async (certUrl, signature) => {
-        seen.push({ certUrl, signature });
-      },
-    });
-    await app.request('/', {
+    const makeVerifyingApp = () =>
+      createAlexaApp({
+        orchestrator: {
+          handleUserMessage: async () => ({
+            reply: 'ok',
+            conversationId: 'c',
+            intent: 'consult' as const,
+            pendingApprovalIds: [],
+          }),
+        } as never,
+        settings: { get: () => 'standard' } as never,
+        push: { notify: async () => undefined } as never,
+        userId: 'u1',
+        verify: async (certUrl, signature) => {
+          seen.push({ certUrl, signature });
+        },
+      });
+
+    await makeVerifyingApp().request('/', {
       method: 'POST',
       body: JSON.stringify(alexaRequest({ type: 'LaunchRequest' })),
-      headers: { 'Signature-Cert-Chain-Url': 'https://s3.amazonaws.com/echo.api/abc', Signature: 'sig123' },
+      headers: {
+        signaturecertchainurl: 'https://s3.amazonaws.com/echo.api/abc',
+        signature: 'sha1-value',
+        'signature-256': 'sha256-value',
+      },
     });
     expect(seen[0].certUrl).toBe('https://s3.amazonaws.com/echo.api/abc');
-    expect(seen[0].signature).toBe('sig123');
+    expect(seen[0].signature).toBe('sha256-value');
+
+    // signature-256が無い旧経路ではsignatureへフォールバックする
+    await makeVerifyingApp().request('/', {
+      method: 'POST',
+      body: JSON.stringify(alexaRequest({ type: 'LaunchRequest' })),
+      headers: { signaturecertchainurl: 'https://s3.amazonaws.com/echo.api/abc', signature: 'sha1-value' },
+    });
+    expect(seen[1].signature).toBe('sha1-value');
   });
 
   it('LaunchRequest は起動あいさつ + セッション維持', async () => {

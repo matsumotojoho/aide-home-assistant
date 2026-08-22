@@ -12,31 +12,43 @@
             "アレクサ、マイアシスタントでリビングの電気つけて",
             "アレクサ、マイアシスタントで今日の天気を教えて"
           ],
-          "keywords": ["アシスタント", "スマートホーム"]
+          "keywords": [
+            "アシスタント",
+            "スマートホーム"
+          ]
         }
       },
       "isAvailableWorldwide": false,
-      "distributionCountries": ["JP"],
-      "distributionMode": "PRIVATE",
+      "distributionCountries": [
+        "JP"
+      ],
+      "distributionMode": "PUBLIC",
       "category": "SMART_HOME"
     },
     "apis": {
       "custom": {
         "endpoint": {
           "uri": "https://aide-server-production-49d1.up.railway.app/alexa",
-          "sslCertificateType": "Trusted"
+          "sslCertificateType": "Wildcard"
         },
         "interfaces": []
       }
     },
-    "manifestAttributes": { "explicitLanguageAndContentRequired": false },
+    "manifestAttributes": {
+      "explicitLanguageAndContentRequired": false
+    },
     "privacyAndCompliance": {
       "allowsPurchases": false,
       "usesPersonalInfo": true,
       "isChildDirected": false,
       "isExportCompliant": true,
       "containsAds": false,
-      "locales": { "ja-JP": { "privacyPolicyUrl": "", "termsOfUseUrl": "" } }
+      "locales": {
+        "ja-JP": {
+          "privacyPolicyUrl": "",
+          "termsOfUseUrl": ""
+        }
+      }
     }
   }
 }
