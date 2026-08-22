@@ -72,8 +72,14 @@ Alexaは「耳と口」。判断・記憶・実行はBackend側 (仕様書3)。
 - 公式の署名検証 (`alexa-verifier`) + タイムスタンプ検証 (150秒)
 - `shouldEndSession: false` でセッション維持 → 「アレクサ」なしで会話継続
 - **Alexaの8秒制限**: 6秒を超えたら「結果はスマホに通知します」と即答し、
-  処理はバックグラウンド継続 → 完了時にWeb Push
-- Alexaセッション → Aide会話のマッピングはプロセス内 (TTL 30分)
+  処理はバックグラウンド継続 → 完了時にWeb Push。
+  さらに「さっきの回答教えて」(recall) で口頭でも聞き直せる
+- **セッションが切れても会話を引き継ぐ**: Alexaは無応答8秒程度でセッションが切れ、
+  話しかけ直すと別sessionIdになる。sessionId対応付け (プロセス内・TTL 30分) が無い場合は
+  直近30分のAlexa会話を続けるため、「寝室もお願い」「さっきの回答教えて」が
+  セッションをまたいでも成立する
+- 呼び出し名が発話に混ざることがあるため `normalizeAlexaQuery` で除去する
+  (呼び出し名を変えたら `INVOCATION_ALIASES` も更新)
 - 読み上げ長は `alexa.verbosity` に従って文単位で切る
 
 ### LLM Provider abstraction (`src/llm/`)
