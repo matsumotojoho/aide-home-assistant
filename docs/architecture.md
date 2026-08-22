@@ -64,6 +64,15 @@ Alexa (Phase 2)     スマホPWA        PC Web
 
 実測レイテンシ: TRÅDFRI (LAN内) 約90ms / SwitchBot (クラウドAPI) 約5秒。SwitchBotはクラウド往復が必須のため1〜2秒目標を満たせない。ローカル制御にはBLEが必要だが、colimaはVM経由でBluetoothを扱えない (HAOSを別筐体へ移せば解決)。
 
+### Alexa Skill (`src/alexa/skill.ts`)
+Alexaは「耳と口」。判断・記憶・実行はBackend側 (仕様書3)。
+- 公式の署名検証 (`alexa-verifier`) + タイムスタンプ検証 (150秒)
+- `shouldEndSession: false` でセッション維持 → 「アレクサ」なしで会話継続
+- **Alexaの8秒制限**: 6秒を超えたら「結果はスマホに通知します」と即答し、
+  処理はバックグラウンド継続 → 完了時にWeb Push
+- Alexaセッション → Aide会話のマッピングはプロセス内 (TTL 30分)
+- 読み上げ長は `alexa.verbosity` に従って文単位で切る
+
 ### LLM Provider abstraction (`src/llm/`)
 `LlmProvider` インターフェース (`available()` / `complete()`) の実装:
 
@@ -72,8 +81,10 @@ Alexa (Phase 2)     スマホPWA        PC Web
 | `claude-cli-local` | Backendと同一マシンに公式Claude Code CLIがある場合。`claude -p --output-format json` (非対話モード) | サブスク枠 |
 | `claude-via-mac` | Railway実行時。Mac Agent経由でMac mini上のClaude CLIを呼ぶ | サブスク枠 |
 | `anthropic-api` | 設定でONにした場合のみ | 従量 (初期OFF) |
+| `openai-api` | 設定でONにした場合のみ | 従量 (初期OFF) |
+| `local-llm` | Ollama互換API。モデル名を設定した場合のみ | 無料 |
 
-`auto` 選択はローカルCLI → Mac Agent経由の順。**有料APIへは自動フォールバックしない**。
+`auto` 選択はローカルCLI → Mac Agent経由 → ローカルLLM の順。**有料APIへは自動フォールバックしない**(テストで固定)。
 非公式API・セッションCookie抜き取り・認証迂回・利用制限回避は行わない。CLIフラグ仕様が変わった場合は `claudeCli.ts` / mac-agentの `llmComplete` を更新する。
 
 ### Orchestrator (`src/orchestrator.ts`)
@@ -133,7 +144,26 @@ SQLite + Drizzle ORM (PostgreSQL移行可能)。UUID主キー、日時は内部U
 
 ## フェーズ計画
 
-- **Phase 1 (実装済み)**: Backend / PWA (Chat・Home・Tasks・History・Memory・Settings・Permissions) / SQLite / Claude接続 (Provider abstraction) / Router / Mac Agent基本通信 / HA導入 / 家電ON/OFF / 会話・操作履歴 / 設定 / Web Push / 承認フロー / Undo / スケジューラ / ChatGPTインポート(基本)
-- **Phase 2**: Alexa Custom Skill (マルチターン) / 学習の高度化 / 繰り返しタスク / 通知詳細設定
-- **Phase 3**: Google Calendar / Gmail / Contacts / Messaging (LINE等) / Playwright / AI専用macOSユーザー / 高度な権限ルール
-- **Phase 4**: Codex連携 / ローカルLLM / 有料APIフォールバック / マルチユーザー / セマンティック記憶
+- **Phase 1 (完了)**: Backend / PWA (Chat・Home・Tasks・History・Memory・Settings・Permissions) / SQLite / Claude接続 (Provider abstraction) / Router / Mac Agent / HA導入 / 家電操作 / 会話・操作履歴 / Web Push / 承認フロー / Undo / スケジューラ
+- **Phase 2 (完了)**: Alexa Custom Skill (署名検証・マルチターン・8秒制限対策) / 繰り返しタスク / 会話の全文検索
+- **Phase 3 (完了)**: Google (Calendar・Gmail・Contacts) / メッセージ送信 (LINE・Slack) / バックグラウンドブラウザ (Playwright) / 承認画面の作り込み
+- **Phase 4 (完了)**: Codex連携 / ローカルLLM Provider / OpenAI Provider / 課金遮断の保証をテストで固定
+
+残りは接続作業のみ (コード側は完了):
+| 項目 | 必要なもの |
+|---|---|
+| Alexa実運用 | Railwayデプロイ + ASKコンソールでのスキル登録 |
+| Google連携 | Google Cloud ConsoleのOAuthクライアントID/シークレット |
+| LINE / Slack | 各サービスのアクセストークン |
+| Codex / ローカルLLM | `codex` / `ollama` のインストール (任意) |
+| AI専用macOSユーザー | macOSでのユーザー作成 (Mac Agentをそのユーザーで起動) |
+
+## 全文検索の実装メモ
+
+SQLite FTS5 (trigram) を messages / memories に張る。実装上の注意:
+
+- **external-content FTS5 では `count(*) FROM xxx_fts` が元テーブルの件数を返す。**
+  未構築の検出に使えないため、`aide_meta.fts_version` で再構築を管理する (`FTS_VERSION` を上げると起動時に一度だけ rebuild)
+- **複数語のクエリをそのまま渡すとフレーズ検索になり0件になる。**
+  語ごとに分割し、AND (絞り込み) → 0件ならOR (拾い上げ) の順で引く
+- trigramは3文字未満のクエリで当たらないため、LIKEフォールバックを併用する

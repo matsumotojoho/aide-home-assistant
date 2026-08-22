@@ -115,18 +115,36 @@ export function createDb(filePath: string): Db {
   sqlite.pragma('journal_mode = WAL');
   sqlite.pragma('foreign_keys = ON');
   sqlite.exec(MIGRATION_SQL);
-  // FTS追加前から存在する行をインデックスへ取り込む (件数が合わない時のみ再構築)
-  try {
-    const msgCount = (sqlite.prepare('SELECT count(*) c FROM messages').get() as { c: number }).c;
-    const ftsCount = (sqlite.prepare('SELECT count(*) c FROM messages_fts').get() as { c: number }).c;
-    if (msgCount !== ftsCount) {
-      sqlite.exec("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')");
-    }
-  } catch {
-    /* fts5が無い環境では検索がLIKEにフォールバックする */
-  }
+  // FTS索引の再構築はバージョンで管理する。
+  // (external-content FTS5 は件数比較では未構築を検出できないため、ヒューリスティックに頼らない)
+  ensureFtsIndexes(sqlite);
+
   const db = drizzle(sqlite, { schema }) as Db;
   return db;
+}
+
+/** FTSの定義を変えたら FTS_VERSION を上げる。起動時に一度だけ再構築される。 */
+const FTS_VERSION = 1;
+
+function ensureFtsIndexes(sqlite: Database.Database): void {
+  try {
+    sqlite.exec('CREATE TABLE IF NOT EXISTS aide_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    const row = sqlite.prepare("SELECT value FROM aide_meta WHERE key='fts_version'").get() as
+      | { value: string }
+      | undefined;
+    if (Number(row?.value ?? 0) >= FTS_VERSION) return;
+
+    for (const table of ['messages_fts', 'memories_fts']) {
+      sqlite.exec(`INSERT INTO ${table}(${table}) VALUES('rebuild')`);
+    }
+    sqlite
+      .prepare("INSERT INTO aide_meta(key, value) VALUES('fts_version', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .run(String(FTS_VERSION));
+    console.log('[db] 全文検索インデックスを再構築しました');
+  } catch (err) {
+    // fts5が使えない環境では検索がLIKEへフォールバックするので、起動は止めない
+    console.warn('[db] FTSインデックスの再構築をスキップしました:', err instanceof Error ? err.message : err);
+  }
 }
 
 export { schema };

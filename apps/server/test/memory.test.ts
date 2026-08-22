@@ -63,3 +63,51 @@ describe('Memory CRUD + 検索', () => {
     expect(env.memory.purgeExpired('unlimited')).toBe(0);
   });
 });
+
+describe('複数キーワード検索 (実運用で発見した不具合の回帰テスト)', () => {
+  it('スペース区切りの複数語がフレーズ扱いされず、ちゃんとヒットする', () => {
+    const env = makeTestEnv();
+    env.memory.write({ kind: 'memory', title: 'エアコンの設定', content: '夏は冷房26度が快適' });
+    // Claudeが実際に投げたクエリの形
+    const hits = env.memory.search('エアコン 冷房 暖房 温度 設定');
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].title).toContain('エアコン');
+  });
+
+  it('全角スペース・読点区切りも扱える', () => {
+    const env = makeTestEnv();
+    env.memory.write({ kind: 'memory', title: '照明メモ', content: '寝室は暗めが好み' });
+    expect(env.memory.search('寝室　照明').length).toBeGreaterThan(0);
+    expect(env.memory.search('寝室、照明').length).toBeGreaterThan(0);
+  });
+
+  it('AND優先: 全部の語を含むものが先に返る', () => {
+    const env = makeTestEnv();
+    env.memory.write({ kind: 'memory', title: 'A', content: 'エアコンの話' });
+    env.memory.write({ kind: 'memory', title: 'B', content: 'エアコンと加湿器の話' });
+    const hits = env.memory.search('エアコン 加湿器');
+    expect(hits).toHaveLength(1);
+    expect(hits[0].title).toBe('B');
+  });
+
+  it('ANDで0件ならORで拾い直す', () => {
+    const env = makeTestEnv();
+    env.memory.write({ kind: 'memory', title: 'A', content: 'エアコンの話' });
+    const hits = env.memory.search('エアコン 存在しない語');
+    expect(hits.length).toBeGreaterThan(0);
+  });
+
+  it('過去の会話も検索対象になる', () => {
+    const env = makeTestEnv();
+    const now = new Date().toISOString();
+    env.db.$client
+      .prepare("INSERT INTO conversations (id,user_id,source,title,created_at,updated_at) VALUES (?,?,?,?,?,?)")
+      .run('c1', env.userId, 'web', 'エアコンの相談', now, now);
+    env.db.$client
+      .prepare('INSERT INTO messages (id,conversation_id,role,content,created_at) VALUES (?,?,?,?,?)')
+      .run('m1', 'c1', 'user', '暑いのでエアコン快適にして', now);
+
+    const hits = env.memory.search('エアコン 快適');
+    expect(hits.some((h) => h.kind === 'conversation')).toBe(true);
+  });
+});
