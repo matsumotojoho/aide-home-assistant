@@ -26,6 +26,7 @@ import type { HomeAssistantClient } from '../ha/client.js';
 import type { AgentGateway } from '../agentGateway.js';
 import { applyUndo } from '../undo.js';
 import { categorize } from '../risk.js';
+import { LoginRateLimiter, clientKey } from '../rateLimit.js';
 import type { GoogleAuth } from '../google/oauth.js';
 import type { MessagingService } from '../messaging/channels.js';
 
@@ -51,12 +52,23 @@ export function createApi(deps: ApiDeps): Hono {
   const { db, userId } = deps;
 
   // ---------- auth ----------
+  const loginLimiter = new LoginRateLimiter();
+
   api.post('/auth/login', async (c) => {
+    const key = clientKey(c.req.raw.headers);
+    const locked = loginLimiter.lockedFor(key);
+    if (locked > 0) {
+      const minutes = Math.ceil(locked / 60);
+      return c.json({ error: `試行回数が多すぎます。${minutes}分ほど待ってから再度お試しください` }, 429);
+    }
+
     const body = await c.req.json<{ password?: string }>().catch(() => ({ password: '' }));
     if (!body.password || !(await deps.auth.verifyPassword(body.password))) {
+      loginLimiter.recordFailure(key);
       await new Promise((r) => setTimeout(r, 500)); // ブルートフォース抑制
       return c.json({ error: 'パスワードが違います' }, 401);
     }
+    loginLimiter.recordSuccess(key);
     await deps.auth.issueSession(c, userId);
     return c.json({ ok: true });
   });
