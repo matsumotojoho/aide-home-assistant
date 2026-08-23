@@ -11,7 +11,7 @@ Alexa・スマホ・PCのどこから話しても、同じ会話・同じ記憶�
 ```
 
 **自分専用に自宅で動かす前提の構成です。** 誰かが用意したサーバーに繋ぐのではなく、
-自分のMac・自分のClaudeアカウント・自分の家で完結します。
+自分の常駐機（Mac miniまたはRaspberry Pi）・自分のClaudeアカウント・自分の家で完結します。
 
 ---
 
@@ -39,7 +39,7 @@ Alexa・スマホ・PCのどこから話しても、同じ会話・同じ記憶�
 | **状態確認** | 天気・室温・家の状態を1秒以内に音声で回答 |
 | **長期記憶** | 会話・好み・操作履歴を横断検索。数か月前の話も引ける |
 | **Alexa** | 呼び出し後はセッション維持。「アレクサ」を毎回言わずに会話が続く |
-| **PC操作** | shell / AppleScript / ヘッドレスブラウザ（Playwright） |
+| **PC操作** | shell / ヘッドレスブラウザ（Playwright）/ AppleScript（macOSのみ） |
 | **承認フロー** | 決済・送信・解錠はスマホで内容を確認してから実行。文面の修正も可能 |
 | **元に戻す** | 家電操作は実行前状態を保存。履歴からワンタップで復元 |
 
@@ -64,22 +64,25 @@ Google（カレンダー・Gmail・連絡先）、LINE、Slackは設定画面か
 ```
 Alexa / スマホPWA / PC
       │ HTTPS
-  Backend (Railway または自宅のMac)
-      │ WebSocket（Mac→サーバーへのoutbound。ルーターのポート開放は不要）
-  Mac Agent（自宅のMacに常駐）
+  Backend (Railway または自宅の常駐機)
+      │ WebSocket（家→サーバーへのoutbound。ルーターのポート開放は不要）
+  Agent（自宅の常駐機に常駐 / macOS・Linux）
       ├→ Home Assistant（LAN内）
       ├→ Claude Code CLI
-      └→ Playwright / shell / AppleScript
+      └→ Playwright / shell /（macOSのみ）AppleScript
 ```
 
 - `apps/server` — Hono + Drizzle + SQLite。Router / Orchestrator / Tool Registry / Risk Engine / Scheduler
 - `apps/web` — Vite + React のPWA
-- `apps/mac-agent` — Mac常駐エージェント
-- `ops/` — Home Assistant（Docker）、launchd、Alexaスキル定義
+- `apps/mac-agent` — 自宅の常駐エージェント（macOS / Linux 両対応）
+- `ops/` — Home Assistant（Docker）、launchd / systemd、Alexaスキル定義
 
 ## 必要なもの
 
-- **常時起動のMac**（Home AssistantとClaude Code CLIが動きます。ここは代替が効きません）
+- **常時起動のマシン**（Home AssistantとClaude Code CLIが動きます）
+  - Mac mini、または **Raspberry Pi 5 / 8GB以上** → [ops/raspberry-pi/README.md](ops/raspberry-pi/README.md)
+  - Piの方が家電は速くなります（SwitchBotをBLE直結でき、応答が5秒→1秒未満）。
+    ただしPC操作（AppleScript・アプリ起動）はmacOS専用です
 - **Claudeのサブスクリプション**（Claude Code CLIが使えること）
 - Home Assistantに繋がるスマートホーム機器
 - Railwayアカウント（外出先から使う場合。自宅内だけならローカル運用も可）

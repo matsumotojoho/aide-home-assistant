@@ -1,0 +1,28 @@
+# Aide Agent を Raspberry Pi で常駐させる systemd ユニット
+#
+#   sudo cp ops/raspberry-pi/aide-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now aide-agent
+#   journalctl -u aide-agent -f
+#
+# User と各パスは環境に合わせて書き換える。
+
+[Unit]
+Description=Aide Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/aide/apps/mac-agent
+# nvm を使っている場合は node の絶対パスを指定する (which node で確認)
+ExecStart=/usr/bin/node /home/pi/aide/node_modules/tsx/dist/cli.mjs /home/pi/aide/apps/mac-agent/src/index.ts
+EnvironmentFile=/home/pi/.aide/agent.env
+Restart=always
+RestartSec=5
+# 再接続を繰り返しても落とさない
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

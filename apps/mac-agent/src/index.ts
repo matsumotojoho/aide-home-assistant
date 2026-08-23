@@ -48,8 +48,18 @@ function writeMode(mode: Mode): void {
   writeFileSync(MODE_FILE, mode);
 }
 
-/** macOSの入力アイドル秒数 (ioreg HIDIdleTime) */
+const IS_MAC = process.platform === 'darwin';
+// Raspberry Pi OS等にzshが無い場合に備える
+const SHELL = IS_MAC ? '/bin/zsh' : existsSync('/bin/zsh') ? '/bin/zsh' : '/bin/bash';
+
+/**
+ * 人の操作が最後にあってからの秒数。
+ * macOSは ioreg の HIDIdleTime から取れる。
+ * Raspberry Pi等のヘッドレスLinuxでは「人が使っている画面」自体が無いので、
+ * 常にアイドル扱いにする (GUIキューイングは意味を持たない)。
+ */
 function getIdleSeconds(): Promise<number> {
+  if (!IS_MAC) return Promise.resolve(Number.MAX_SAFE_INTEGER);
   return new Promise((resolve) => {
     execFile('ioreg', ['-c', 'IOHIDSystem', '-d', '4'], { timeout: 5000 }, (err, stdout) => {
       if (err) return resolve(0);
@@ -115,11 +125,20 @@ async function macExecute(params: MacExecuteParams, allowQueue = true): Promise<
   }
   switch (params.kind) {
     case 'shell':
-      return runCommand('/bin/zsh', ['-lc', params.command], null, timeoutMs);
+      return runCommand(SHELL, ['-lc', params.command], null, timeoutMs);
     case 'applescript':
+      if (!IS_MAC) {
+        return { status: 'done', stderr: 'AppleScriptはmacOSでのみ利用できます', exitCode: 1 };
+      }
       return runCommand('osascript', ['-e', params.command], null, timeoutMs);
     case 'open_app':
-      return runCommand('open', ['-a', params.command], null, timeoutMs);
+      // macOSは open -a、Linuxデスクトップならxdg-open。ヘッドレスでは意味がない
+      return runCommand(
+        IS_MAC ? 'open' : 'xdg-open',
+        IS_MAC ? ['-a', params.command] : [params.command],
+        null,
+        timeoutMs,
+      );
     case 'playwright': {
       // headlessなので人間のGUIを奪わない → キュー不要
       try {
@@ -210,14 +229,14 @@ async function haRequest(params: { method: string; path: string; body?: unknown 
 // codexが未インストールなら明示的にその旨を返す (勝手に導入しない)。
 
 async function runCodex(params: { prompt: string; cwd?: string; timeoutMs?: number }): Promise<ExecResult> {
-  const probe = await runCommand('/bin/zsh', ['-lc', 'command -v codex'], null, 5000);
+  const probe = await runCommand(SHELL, ['-lc', 'command -v codex'], null, 5000);
   if ((probe.exitCode ?? 1) !== 0) {
     return { status: 'done', stderr: 'Codex CLIがインストールされていません', exitCode: 127 };
   }
   const cwd = params.cwd ? `cd ${JSON.stringify(params.cwd)} && ` : '';
   // 非対話モードで実行 (承認プロンプトで固まらないようにする)
   const cmd = `${cwd}codex exec ${JSON.stringify(params.prompt)}`;
-  return runCommand('/bin/zsh', ['-lc', cmd], null, params.timeoutMs ?? 300_000);
+  return runCommand(SHELL, ['-lc', cmd], null, params.timeoutMs ?? 300_000);
 }
 
 // ---------- WebSocket接続 ----------
@@ -323,5 +342,5 @@ process.on('SIGTERM', () => {
   void closeBrowser().finally(() => process.exit(0));
 });
 
-console.log(`Aide Mac Agent v${VERSION} (mode file: ${MODE_FILE})`);
+console.log(`Aide Agent v${VERSION} on ${process.platform}/${process.arch} (mode file: ${MODE_FILE})`);
 connect();
