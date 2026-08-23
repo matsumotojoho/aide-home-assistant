@@ -132,6 +132,11 @@ export interface SettingsMap {
    * off   = 返答したらセッションを閉じる (毎回「アレクサ」が必要)
    */
   'alexa.followup': 'quiet' | 'ask' | 'off';
+  /**
+   * Alexaスキルの呼び出し名。発話に混ざって届くことがあるため除去に使う。
+   * interaction-model.json の invocationName と揃える。読みの揺れはカンマ区切りで足せる。
+   */
+  'alexa.invocation_name': string;
   'notifications.level': 'all' | 'important' | 'failure' | 'none';
   'memory.retention': 'unlimited' | '30d' | '90d' | '1y' | string; // string = custom days e.g. '180d'
   'learning.enabled': 'on' | 'off';
@@ -152,6 +157,7 @@ export const DEFAULT_SETTINGS: SettingsMap = {
   'ai.claude_cli_model': '',
   'alexa.verbosity': 'standard',
   'alexa.followup': 'quiet',
+  'alexa.invocation_name': 'エージェント,えーじぇんと',
   'notifications.level': 'important',
   'memory.retention': 'unlimited',
   'learning.enabled': 'on',

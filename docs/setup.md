@@ -171,3 +171,46 @@ node ops/migrate-data.mjs <移行元URL> <移行先URL> <パスワード>
 ```
 
 会話履歴は移行対象外 (移行元に残る)。
+
+
+## 別の家へ導入する場合
+
+コードに特定の家に依存する値は入っていない。家ごとに違うのは以下だけで、
+すべて設定・DB・環境変数のどれかに収まっている。
+
+| 家ごとに違うもの | どこで設定するか |
+|---|---|
+| 家電 (entity_id・日本語名・部屋) | PWA設定タブ → デバイス登録 (DB) |
+| Home Assistantのトークン | `./ops/set-ha-token.sh <token>` |
+| 位置情報 (天気用) | 設定タブ `home.location`。HAの設定から取り込める |
+| Alexaの呼び出し名 | 設定タブ `alexa.invocation_name` + `ops/alexa/interaction-model.json` |
+| 公開URL | Railwayのドメイン。`PUBLIC_URL` とAlexaのEndpointに設定 |
+| ログインパスワード・各種シークレット | `npm run setup -- <パスワード>` で生成 |
+| Google / LINE / Slack | 設定タブ → 外部サービス連携 |
+
+### 手順
+
+1. リポジトリを配置し `npm install`
+2. `npm run setup -- <ログインパスワード>` で `.env` 生成
+3. Home Assistantを立てて機器を繋ぐ (上記「2. Home Assistant」)
+4. `./ops/set-ha-token.sh <HAの長期アクセストークン>`
+5. Mac Agentを常駐化 (上記「4. Mac Agent」)
+6. Railwayへデプロイ (上記「5. Railwayデプロイ」)
+7. PWAの設定タブで家電を登録し、`home.location` を設定
+8. Alexaを使うなら `ops/alexa/README.md` の手順
+
+### 前提として必要なもの
+
+- 常時起動のMac (Home AssistantとClaude Code CLIが動く)
+- Claudeのサブスクリプション (Claude Code CLIが使えること)
+- Railwayアカウント (外部公開する場合)
+- Amazon開発者アカウント + Echoと同じAmazonアカウント (Alexaを使う場合)
+- SwitchBotハブ等、機器側のクラウド連携 (Bluetooth直結はcolimaでは不可)
+
+### 移行
+
+既存インスタンスからデバイス登録・設定・権限・記憶を移すには:
+
+```sh
+node ops/migrate-data.mjs <移行元URL> <移行先URL> <パスワード>
+```

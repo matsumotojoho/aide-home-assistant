@@ -66,8 +66,8 @@ function defaultVerify(certUrl: string, signature: string, body: string): Promis
 // Alexaは呼び出し名を含んだ発話をそのままスロットに入れてくることがある。
 // 例: 「えーあいでリビングの電気つけて」→ query="えーあいでリビングの電気つけて"
 // このままRouterへ渡すと部屋やデバイスの判定を邪魔するため、前置きを取り除く。
-// 呼び出し名を変えたらここも更新する (ops/alexa/interaction-model.json の invocationName)
-const INVOCATION_ALIASES = ['エージェント', 'えーじぇんと', 'エージェンt', 'agent'];
+// 呼び出し名は家ごとに違うので設定 (alexa.invocation_name) から読む。
+// カンマ区切りで読みの揺れを登録できる。
 // 呼び出し名の直後に来る助詞
 const PARTICLE_RE = /^(で|に|を|の|、|,|\s)+/;
 // 「開いて」等しか残らなければ、それは起動要求であって用件ではない
@@ -79,13 +79,22 @@ const LAUNCH_ONLY_RE = /^(を|に)?(開いて|ひらいて|開けて|起動し�
 const CLOSING_RE =
   /^(ありがと(う|ー)?(ございます|ございました)?|どうも(ありがとう)?|おしまい|終わり|終わって|もういい(よ|です)?|もう大丈夫|大丈夫(です)?|以上(です)?|なんでもない|バイバイ|またね|おやすみ(なさい)?)[。！!、,]?$/;
 
-export function normalizeAlexaQuery(raw: string): {
+export function normalizeAlexaQuery(
+  raw: string,
+  invocationNames = 'エージェント',
+): {
   query: string;
   isLaunch: boolean;
   isClosing?: boolean;
 } {
   let text = raw.normalize('NFKC').trim();
-  for (const alias of INVOCATION_ALIASES) {
+  const aliases = invocationNames
+    .split(',')
+    .map((a) => a.trim())
+    .filter((a) => a.length > 0)
+    // 長い表記から先に削らないと部分一致で削り残る
+    .sort((a, b) => b.length - a.length);
+  for (const alias of aliases) {
     if (text.startsWith(alias)) {
       text = text.slice(alias.length).replace(PARTICLE_RE, '').trim();
       break;
@@ -220,7 +229,10 @@ export function createAlexaApp(deps: AlexaDeps): Hono {
         }
 
         const rawQuery = body.request.intent?.slots?.query?.value?.trim() ?? '';
-        const { query, isLaunch, isClosing } = normalizeAlexaQuery(rawQuery);
+        const { query, isLaunch, isClosing } = normalizeAlexaQuery(
+          rawQuery,
+          deps.settings.get('alexa.invocation_name'),
+        );
         if (isClosing) {
           return c.json(speechResponse(closingReply(rawQuery), true));
         }

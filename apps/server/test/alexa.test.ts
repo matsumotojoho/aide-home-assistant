@@ -183,14 +183,16 @@ describe('Alexa応答長 (alexa.verbosity)', () => {
   });
 });
 
+const NAMES = 'エージェント,えーじぇんと';
+
 describe('呼び出し名が混ざった発話の正規化 (実機で発覚)', () => {
   it('呼び出し名+助詞を取り除く', async () => {
     const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
-    expect(normalizeAlexaQuery('エージェントでリビングの電気つけて')).toEqual({
+    expect(normalizeAlexaQuery('エージェントでリビングの電気つけて', NAMES)).toEqual({
       query: 'リビングの電気つけて',
       isLaunch: false,
     });
-    expect(normalizeAlexaQuery('えーじぇんとに寝室のエアコン26度にして')).toEqual({
+    expect(normalizeAlexaQuery('えーじぇんとに寝室のエアコン26度にして', NAMES)).toEqual({
       query: '寝室のエアコン26度にして',
       isLaunch: false,
     });
@@ -199,13 +201,13 @@ describe('呼び出し名が混ざった発話の正規化 (実機で発覚)', (
   it('起動だけの発話はisLaunchになる (Claudeを呼ばない)', async () => {
     const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
     for (const phrase of ['エージェントを開いて', 'エージェント', 'えーじぇんとを起動して', 'エージェントひらいて']) {
-      expect(normalizeAlexaQuery(phrase).isLaunch, phrase).toBe(true);
+      expect(normalizeAlexaQuery(phrase, NAMES).isLaunch, phrase).toBe(true);
     }
   });
 
   it('呼び出し名が無い発話はそのまま通す', async () => {
     const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
-    expect(normalizeAlexaQuery('リビングの電気つけて')).toEqual({
+    expect(normalizeAlexaQuery('リビングの電気つけて', NAMES)).toEqual({
       query: 'リビングの電気つけて',
       isLaunch: false,
     });
@@ -214,7 +216,7 @@ describe('呼び出し名が混ざった発話の正規化 (実機で発覚)', (
   it('デバイス名に呼び出し名が紛れても本文を壊さない', async () => {
     const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
     // 先頭以外の一致は削らない
-    expect(normalizeAlexaQuery('今日のエージェントの調子はどう').query).toBe('今日のエージェントの調子はどう');
+    expect(normalizeAlexaQuery('今日のエージェントの調子はどう', NAMES).query).toBe('今日のエージェントの調子はどう');
   });
 
   it('起動だけの発話にはClaudeを使わず即答する', async () => {
@@ -226,7 +228,9 @@ describe('呼び出し名が混ざった発話の正規化 (実機で発覚)', (
           return { reply: 'x', conversationId: 'c', intent: 'consult' as const, pendingApprovalIds: [] };
         },
       } as never,
-      settings: { get: () => 'standard' } as never,
+      settings: {
+        get: (k: string) => (k === 'alexa.invocation_name' ? NAMES : 'standard'),
+      } as never,
       push: { notify: async () => undefined } as never,
       userId: 'u1',
       verify: async () => undefined,
@@ -376,5 +380,27 @@ describe('返答後の聞き返し (alexa.followup)', () => {
       })
     ).json()) as Record<string, unknown>;
     expect((json.response as Record<string, unknown>).reprompt).toBeDefined();
+  });
+});
+
+describe('呼び出し名の設定化 (他の家でも使えること)', () => {
+  it('設定した呼び出し名で除去できる (コード変更なしで変えられる)', async () => {
+    const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
+    // 別の家が「うちのアシスタント」を使う場合
+    const names = 'うちのアシスタント,アシスタント';
+    expect(normalizeAlexaQuery('うちのアシスタントでリビングの電気つけて', names).query).toBe('リビングの電気つけて');
+    expect(normalizeAlexaQuery('うちのアシスタントを開いて', names).isLaunch).toBe(true);
+  });
+
+  it('長い表記を先に削るので削り残さない', async () => {
+    const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
+    // 「アシスタント」を先に削ると「うちの」が残ってしまう
+    const names = 'アシスタント,うちのアシスタント';
+    expect(normalizeAlexaQuery('うちのアシスタントで電気つけて', names).query).toBe('電気つけて');
+  });
+
+  it('設定が空でも壊れない', async () => {
+    const { normalizeAlexaQuery } = await import('../src/alexa/skill.js');
+    expect(normalizeAlexaQuery('リビングの電気つけて', '').query).toBe('リビングの電気つけて');
   });
 });

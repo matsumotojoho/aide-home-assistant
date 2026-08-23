@@ -974,6 +974,15 @@ export function SettingsView() {
           ['detailed', '詳しく'],
           ['full', '全文'],
         ])}
+        <label className="field">
+          <span>Alexaの呼び出し名 (読みの揺れはカンマ区切り)</span>
+          <input
+            value={settings['alexa.invocation_name'] ?? ''}
+            onChange={(e) => setSettings((s) => ({ ...s, 'alexa.invocation_name': e.target.value }))}
+            onBlur={(e) => void setSetting('alexa.invocation_name', e.target.value)}
+            placeholder="エージェント,えーじぇんと"
+          />
+        </label>
         {sel('alexa.followup', [
           ['quiet', '返答後: 聞き返さない (無言ならそのまま終了)'],
           ['ask', '「ほかに何かありますか?」と聞き返す'],
