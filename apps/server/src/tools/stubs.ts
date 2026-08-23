@@ -48,13 +48,13 @@ const anyObj = z.record(z.unknown());
 export const webSearch: ToolDef = {
   name: 'web.search',
   description:
-    'Web検索。Claude CLI Provider使用時はProvider内蔵のWebSearchが自動的に使われるため、このツールではなく自身の検索機能を使うこと。',
+    '【呼ばないこと】Web検索はあなた自身の検索機能を使う。こちらは外部の検索APIを契約していないため常に失敗する。',
   inputSchema: z.object({ query: z.string().min(1) }),
-  inputDoc: '{"query":"..."}',
+  inputDoc: '(使用しない)',
   async execute() {
     return {
       ok: false,
-      error: '検索はProvider内蔵のWebSearch機能を使用してください (無料枠のため外部検索APIは未接続)',
+      error: '外部の検索APIは未契約です。自分のWeb検索機能を使ってください',
     };
   },
 };

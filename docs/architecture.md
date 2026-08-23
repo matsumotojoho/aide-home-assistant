@@ -104,6 +104,12 @@ PWAのChatは入口をまたいだ1本のタイムラインを表示する。
 | `local-llm` | Ollama互換API。モデル名を設定した場合のみ | 無料 |
 
 `auto` 選択はローカルCLI → Mac Agent経由 → ローカルLLM の順。**有料APIへは自動フォールバックしない**(テストで固定)。
+
+**Claude CLIには `WebSearch` と `WebFetch` の両方を許可する。**
+WebFetchが無いと検索結果のURLを開けず、一覧サイトを読めないため調べ物の質が大きく落ちる。
+実機で確認: 「上映館を全部調べて」に対し WebSearchのみ=2館 (しかも未確認の館を「上映していません」と断言)、
+WebSearch+WebFetch=7館を時刻付きで正答。Aide側の `web.fetch` を1件ずつ呼ぶより速く質も高いため、
+調べ物はCLI内蔵ツールに任せる方針。
 非公式API・セッションCookie抜き取り・認証迂回・利用制限回避は行わない。CLIフラグ仕様が変わった場合は `claudeCli.ts` / mac-agentの `llmComplete` を更新する。
 
 ### Orchestrator (`src/orchestrator.ts`)

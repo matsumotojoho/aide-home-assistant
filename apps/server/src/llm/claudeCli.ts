@@ -24,9 +24,12 @@ export class ClaudeCliProvider implements LlmProvider {
   }
 
   async complete(req: LlmRequest): Promise<LlmResponse> {
-    const args = ['-p', '--output-format', 'json', '--max-turns', '8'];
-    // Web検索のみCLI内蔵ツールとして許可 (ファイル操作等はAide側のTool Registryで管理)
-    args.push('--allowedTools', 'WebSearch');
+    const args = ['-p', '--output-format', 'json', '--max-turns', '12'];
+    // 調べ物はCLI内蔵のWebSearch+WebFetchに任せる。
+    // WebFetchが無いと検索結果のURLを開けず、一覧サイトを読めないため
+    // 「上映館を全部調べて」のような依頼で結果が大きく劣化する (実機で確認)。
+    // ファイル操作等はAide側のTool Registryで管理するのでここでは許可しない。
+    args.push('--allowedTools', 'WebSearch', 'WebFetch');
     const model = req.model || this.defaultModel;
     if (model) args.push('--model', model);
     if (req.system) args.push('--append-system-prompt', req.system);

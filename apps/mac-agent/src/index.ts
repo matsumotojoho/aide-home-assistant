@@ -146,8 +146,9 @@ async function drainGuiQueue(): Promise<void> {
 // ---------- Claude Code CLI ブリッジ ----------
 
 function llmComplete(params: LlmCompleteParams): Promise<{ text: string }> {
-  const args = ['-p', '--output-format', 'json', '--max-turns', String(params.maxTurns ?? 8)];
-  args.push('--allowedTools', 'WebSearch');
+  const args = ['-p', '--output-format', 'json', '--max-turns', String(params.maxTurns ?? 12)];
+  // WebFetchが無いと検索結果のURLを開けず、調べ物の質が大きく落ちる
+  args.push('--allowedTools', 'WebSearch', 'WebFetch');
   if (params.model) args.push('--model', params.model);
   if (params.system) args.push('--append-system-prompt', params.system);
 
