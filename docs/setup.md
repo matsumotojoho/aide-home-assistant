@@ -152,7 +152,7 @@ npm run typecheck
         └→ Playwright / shell
 ```
 
-- 公開URL: `https://aide-server-production-49d1.up.railway.app`
+- 公開URL: Railwayが発行するドメイン (`railway domain` で確認)
 - データ: Railway Persistent Volume の `/data/aide.db`
 - `HA_BASE_URL` / `HA_TOKEN` はRailway側では**空**。LANへ直接届かないため、
   Mac Agentの `ha.request` プロキシ経由で操作する (トークンはMac側の `~/.aide/agent.env` にのみ置く)

@@ -1,6 +1,7 @@
 # Alexa Custom Skill セットアップ
 
-> エンドポイントは公開済みです: `https://aide-server-production-49d1.up.railway.app/alexa`
+> 前提: Railway等へデプロイ済みで `https://<ドメイン>/alexa` が公開されていること。
+> AlexaはHTTPS必須のため localhost では動作しません。
 > AlexaはHTTPS必須のため、ローカル(localhost)では動作しません。
 
 ## 手順
@@ -23,7 +24,7 @@
 
 4. **Endpoint** を設定
    - Endpoint → **HTTPS**
-   - Default Region: `https://aide-server-production-49d1.up.railway.app/alexa`
+   - Default Region: `https://<あなたのRailwayドメイン>/alexa`
    - SSL証明書の種別: **サブドメインのワイルドカード証明書** を選ぶ
      (Railwayは `*.up.railway.app` のワイルドカード証明書。「信頼された認証局〜」を選ぶと
       AlexaがTLS検証で接続を拒否し、リクエストがサーバーに一切届かない)

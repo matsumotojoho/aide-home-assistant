@@ -1,48 +1,140 @@
-# Aide — 自分専用AI生活アシスタント
+# Aide — 自分の家で動かすAI生活アシスタント
 
-自然言語で目的を伝えると、必要な手段を選び、家電・PC・Webサービスを操作するパーソナルAIエージェント。
+自然言語で目的を伝えると、必要な手段を選んで家電・PC・Webサービスを操作します。
+Alexa・スマホ・PCのどこから話しても、同じ会話・同じ記憶が続きます。
 
 ```
-「寝室の電気つけて」        → Router即実行 (Claude不使用、1〜2秒)
-「部屋いい感じにして」       → Claudeが室温・好み・時刻から判断して実行
-「19時に帰るから快適にして」 → 予約タスク化、実行直前に状況を再確認して調整
-「田中さんに遅れると伝えて」 → 文面を作りスマホで承認 (Phase 3)
+「リビングの電気つけて」        → 0.7秒で点灯 (AIを経由しない)
+「エアコンつけて」             → 室温と外気温から判断し「冷房26度でつけました」
+「19時に帰るから快適にしといて」 → 予約し、実行直前に状況を再確認して設定値を調整
+「この前調べたやつ何だっけ」     → 過去の会話から答える
 ```
+
+**自分専用に自宅で動かす前提の構成です。** 誰かが用意したサーバーに繋ぐのではなく、
+自分のMac・自分のClaudeアカウント・自分の家で完結します。
+
+---
+
+## ⚠️ 使う前に読んでください
+
+**これは単一ユーザー構成です。** 認証を通った人は誰でも、登録された家電すべてを操作できます。
+玄関の鍵を繋いだ場合は解錠も含まれます（解錠は既定で承認必須にしていますが、
+承認するのも同じアカウントです）。
+
+- パスワードを他人と共有しないでください
+- 公開URLで運用する場合、パスワードが唯一の壁です（総当たり対策として15分5回でロックします）
+- **不特定多数に使わせる用途には作られていません。** そうしたい場合はマルチユーザー化が必要です
+
+鍵や決済を繋ぐかどうかは、リスクを理解したうえで判断してください。
+
+---
+
+## 何ができるか
+
+| | |
+|---|---|
+| **家電操作** | Home Assistant経由。明確な指示はAIを経由せず即実行（実測0.7秒） |
+| **曖昧な指示** | 「部屋いい感じにして」を室温・外気温・時刻・過去の好みから判断 |
+| **予約** | 「19時に帰るから〜」を予約し、実行直前に状況を再確認して設定値を再計算 |
+| **状態確認** | 天気・室温・家の状態を1秒以内に音声で回答 |
+| **長期記憶** | 会話・好み・操作履歴を横断検索。数か月前の話も引ける |
+| **Alexa** | 呼び出し後はセッション維持。「アレクサ」を毎回言わずに会話が続く |
+| **PC操作** | shell / AppleScript / ヘッドレスブラウザ（Playwright） |
+| **承認フロー** | 決済・送信・解錠はスマホで内容を確認してから実行。文面の修正も可能 |
+| **元に戻す** | 家電操作は実行前状態を保存。履歴からワンタップで復元 |
+
+Google（カレンダー・Gmail・連絡先）、LINE、Slackは設定画面から接続できます。
+
+## 設計の要点
+
+**AIをすべての入口にしない。** 「電気つけて」のような明確な指示はルールベースのRouterが
+直接Home Assistantへ流します。AIが止まっていても家電は動きます。
+
+**AIは判断が要るときだけ。** 曖昧な指示・複数手順・調べ物・PC操作の計画に限定することで、
+利用枠と待ち時間を節約します。
+
+**AI Providerは差し替え可能。** 既定はClaude Code CLI（サブスク枠）。Anthropic API / OpenAI API /
+ローカルLLM（Ollama）へ切り替えられます。**有料APIは初期状態でOFF**で、
+明示的に有効化するまで課金経路を一切通りません（テストで固定）。
+
+**記憶・設定・履歴は自前で持つ。** Providerを差し替えても失われません。
 
 ## 構成
 
-- `apps/server` — Backend (Hono + Drizzle + SQLite)。Router / Orchestrator / Tool Registry / Risk Engine / Scheduler / Web Push
-- `apps/web` — PWA (Vite + React)。Chat / Home / Tasks / History / Memory / Settings
-- `apps/mac-agent` — Mac mini常駐Agent (Outbound WS)。shell/AppleScript実行、GUIキュー、Claude CLIブリッジ、HAプロキシ
-- `packages/shared` — 共有型・プロトコル
-- `ops/homeassistant` — Home Assistant (Docker/colima)
-- `docs/` — [architecture](docs/architecture.md) / [setup](docs/setup.md) / [security](docs/security.md) / [alexa-limitations](docs/alexa-limitations.md)
+```
+Alexa / スマホPWA / PC
+      │ HTTPS
+  Backend (Railway または自宅のMac)
+      │ WebSocket（Mac→サーバーへのoutbound。ルーターのポート開放は不要）
+  Mac Agent（自宅のMacに常駐）
+      ├→ Home Assistant（LAN内）
+      ├→ Claude Code CLI
+      └→ Playwright / shell / AppleScript
+```
 
-## クイックスタート
+- `apps/server` — Hono + Drizzle + SQLite。Router / Orchestrator / Tool Registry / Risk Engine / Scheduler
+- `apps/web` — Vite + React のPWA
+- `apps/mac-agent` — Mac常駐エージェント
+- `ops/` — Home Assistant（Docker）、launchd、Alexaスキル定義
+
+## 必要なもの
+
+- **常時起動のMac**（Home AssistantとClaude Code CLIが動きます。ここは代替が効きません）
+- **Claudeのサブスクリプション**（Claude Code CLIが使えること）
+- Home Assistantに繋がるスマートホーム機器
+- Railwayアカウント（外出先から使う場合。自宅内だけならローカル運用も可）
+- Amazon開発者アカウント（Alexaを使う場合。**Echoと同じAmazonアカウント**である必要があります）
+
+> Claudeのサブスクリプションは個人利用に限られます。自分以外の人のリクエストを
+> 自分のサブスクで処理することは規約違反です。各自が自分のアカウントで動かしてください。
+
+## はじめ方
 
 ```sh
 npm install
-npm run setup -- <ログインパスワード>   # .env生成
-npm run build                          # PWAビルド
+npm run setup -- <ログインパスワード>   # .env を生成
+npm run build
 npm start                              # http://localhost:8787
 ```
 
-Home Assistant / Mac Agent / Railwayデプロイは [docs/setup.md](docs/setup.md) 参照。
+Home Assistantの構築、Mac Agentの常駐化、Railwayデプロイ、Alexaスキルの作成は
+**[docs/setup.md](docs/setup.md)** に手順があります。
 
-## 技術選定と理由
+- [docs/architecture.md](docs/architecture.md) — 設計と、実機で判明した制約
+- [docs/security.md](docs/security.md) — 権限・承認・秘密情報の扱い
+- [docs/alexa-limitations.md](docs/alexa-limitations.md) — Alexa側の制約
+- [ops/alexa/README.md](ops/alexa/README.md) — スキル作成手順と落とし穴
 
-仕様書からの変更点 (詳細は docs/architecture.md):
+## 実機で踏んだ落とし穴
 
-- **Hono** (推奨候補のうち軽量な方を採用)
-- **Vite + React SPA** — Next.js推奨に対し、単一ユーザーPWAにSSRが不要でRailway 1サービスに収めるため変更
-- **colima** — Docker Desktopより軽量・無料でヘッドレス常駐向き
-- **tsx実行** — 小規模のためビルドレス。型検査は `npm run typecheck`
-- **パスワード+セッションCookie認証** — 単一ユーザーの実装コストと安全性のバランス (Google OAuthへ置換可能な構造)
+同じ構成を作る人が同じ時間を溶かさないよう、記録しています。
 
-## 原則
+- **Railwayの証明書種別は `Wildcard`。** `Trusted` を選ぶとAlexaが接続せず、サーバーにログすら残りません
+- **署名検証は `signature-256`（SHA-256）を使う。** Alexaは `signature`（SHA-1）も送りますが、
+  そちらを検証に渡すと100%失敗します
+- **Claude CLIには `WebFetch` も許可する。** 無いと検索結果のURLを開けず、調べ物の質が激減します
+  （「上映館を全部調べて」で2館→7館の差が出ました）
+- **`AMAZON.SearchQuery` はスロット単体の発話を許さない。** 自由発話を受けるにはカスタムスロット型を使います
+- **「ありがとう」はStopIntentに明示登録する。** しないとAIに送られ、10秒待たされた挙げ句
+  的外れな返事になります
+- **呼び出し名に「エーアイ」は使えない。** Alexaが音楽検索と誤認します
+- **HAのドメインは種別でなくentity_idから決める。** 赤外線リモコンの照明は `switch.*` なので、
+  `light.turn_on` を投げるとHAは200を返しつつ何も実行しません
+- **HAは対象がオフラインでも200を返す。** 応答内容を確認しないと「つけました」と嘘をつきます
 
-- AI Providerは抽象化 (Claude Code CLI → Anthropic API / OpenAI / ローカルLLMへ切替可能)
-- 有料APIは初期OFF。ONにするまで課金経路は使われない
-- 非公式API・認証迂回・利用制限回避は使用しない
-- 家電の明確な操作はClaude障害時も動作する
-- すべてのTool実行は履歴に記録され、可能な操作はUndoできる
+詳細は各ドキュメントに書いています。
+
+## 開発
+
+```sh
+npm test         # 154件
+npm run typecheck
+npm run dev:server
+npm run dev:web
+```
+
+## ライセンス
+
+MIT
+
+**無保証です。** 家電・鍵・決済を扱うため、導入と運用は自己責任でお願いします。

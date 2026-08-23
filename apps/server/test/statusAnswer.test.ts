@@ -120,7 +120,7 @@ describe('状態確認の即答', () => {
     vi.stubGlobal('fetch', async () =>
       new Response(JSON.stringify({ current: { temperature_2m: 18.9, weather_code: 51 } }), { status: 200 }),
     );
-    const answer = await answerStatus('weather', deps(env, '36.5,139.2'));
+    const answer = await answerStatus('weather', deps(env, '35.0,135.0'));
     expect(answer).toContain('18.9度');
     expect(answer).toContain('小雨');
     expect(answer).toContain('24.8度');
@@ -135,7 +135,7 @@ describe('状態確認の即答', () => {
       attributes: { device_class: 'temperature' },
     });
     vi.stubGlobal('fetch', async () => new Response('', { status: 500 }));
-    const answer = await answerStatus('weather', deps(env, '36.5,139.2'));
+    const answer = await answerStatus('weather', deps(env, '35.0,135.0'));
     expect(answer).toContain('取得できませんでした');
     expect(answer).toContain('24.8度');
   });

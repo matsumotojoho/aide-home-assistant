@@ -28,7 +28,7 @@
     "apis": {
       "custom": {
         "endpoint": {
-          "uri": "https://aide-server-production-49d1.up.railway.app/alexa",
+          "uri": "https://REPLACE_WITH_YOUR_DOMAIN/alexa",
           "sslCertificateType": "Wildcard"
         },
         "interfaces": []
