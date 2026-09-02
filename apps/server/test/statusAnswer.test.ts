@@ -150,6 +150,9 @@ describe('状態取得が遅いとき', () => {
     const answer = await answerStatus('indoor', deps(env));
     const elapsed = Date.now() - started;
     expect(elapsed).toBeLessThan(6000);
-    expect(answer).toContain('見つかりませんでした');
+    // 「センサーが無い」ではなく「取れなかった」と言う。
+    // 機器の故障と誤診させないため (実運用でSwitchBotが壊れたと誤解させた)
+    expect(answer).toContain('取得できませんでした');
+    expect(answer).not.toContain('センサーが見つかりません');
   }, 10_000);
 });

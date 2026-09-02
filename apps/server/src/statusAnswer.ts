@@ -51,7 +51,11 @@ export async function answerStatus(
   }
 
   if (topic === 'weather') {
-    const [weather, indoor] = await Promise.all([fetchWeather(deps.location), readIndoor(deps)]);
+    const [weather, indoor] = await Promise.all([
+      fetchWeather(deps.location),
+      // 家電が取れなくても外の天気は答えられる
+      readIndoor(deps).catch(() => ({ temperature: null, humidity: null })),
+    ]);
     const parts: string[] = [];
     if (weather) {
       parts.push(`外は${weather.temp}度で${weather.description}です`);
@@ -67,7 +71,12 @@ export async function answerStatus(
   }
 
   if (topic === 'indoor') {
-    const indoor = await readIndoor(deps);
+    let indoor: { temperature: number | null; humidity: number | null };
+    try {
+      indoor = await readIndoor(deps);
+    } catch {
+      return '家電の状態を取得できませんでした。少し待ってからもう一度お試しください。';
+    }
     if (indoor.temperature === null && indoor.humidity === null) {
       return '室温を測れるセンサーが見つかりませんでした。';
     }
@@ -78,7 +87,13 @@ export async function answerStatus(
   }
 
   // home: 家全体のサマリ
-  const [indoor, summary] = await Promise.all([readIndoor(deps), readHomeSummary(deps)]);
+  let indoor: { temperature: number | null; humidity: number | null };
+  let summary: Awaited<ReturnType<typeof readHomeSummary>>;
+  try {
+    [indoor, summary] = await Promise.all([readIndoor(deps), readHomeSummary(deps)]);
+  } catch {
+    return '家電の状態を取得できませんでした。少し待ってからもう一度お試しください。';
+  }
   const parts: string[] = [];
   if (indoor.temperature !== null) {
     parts.push(`室温${indoor.temperature}度${indoor.humidity !== null ? `、湿度${indoor.humidity}%` : ''}`);
@@ -123,16 +138,24 @@ async function fetchWeather(
 // (Mac Agent再接続中などにHA経由の取得が十数秒かかることがある)
 const STATE_READ_TIMEOUT_MS = 4000;
 
-async function loadStates(deps: StatusDeps): Promise<HaState[]> {
-  if (!deps.ha.configured()) return [];
-  try {
-    return await Promise.race([
-      deps.ha.getStates(),
-      new Promise<HaState[]>((resolve) => setTimeout(() => resolve([]), STATE_READ_TIMEOUT_MS)),
-    ]);
-  } catch {
-    return [];
+/** 家の状態が取れなかった (接続断・タイムアウト) ことを示す */
+export class HomeStateUnavailable extends Error {
+  constructor() {
+    super('家電の状態を取得できませんでした');
+    this.name = 'HomeStateUnavailable';
   }
+}
+
+async function loadStates(deps: StatusDeps): Promise<HaState[]> {
+  if (!deps.ha.configured()) throw new HomeStateUnavailable();
+  const TIMEOUT = Symbol('timeout');
+  const result = await Promise.race([
+    deps.ha.getStates().catch(() => TIMEOUT),
+    new Promise<typeof TIMEOUT>((resolve) => setTimeout(() => resolve(TIMEOUT), STATE_READ_TIMEOUT_MS)),
+  ]);
+  // 取れなかったことを「センサーが無い」と混同しない
+  if (result === TIMEOUT) throw new HomeStateUnavailable();
+  return result as HaState[];
 }
 
 async function readIndoor(deps: StatusDeps): Promise<{ temperature: number | null; humidity: number | null }> {
@@ -215,7 +238,10 @@ async function readHomeSummary(deps: StatusDeps): Promise<{
  * 実測で応答が数十秒伸びる。先に渡しておく方が速く、判断も安定する。
  */
 export async function buildContextSnapshot(deps: StatusDeps): Promise<string> {
-  const [weather, states] = await Promise.all([fetchWeather(deps.location), loadStates(deps)]);
+  const [weather, states] = await Promise.all([
+    fetchWeather(deps.location),
+    loadStates(deps).catch(() => [] as HaState[]),
+  ]);
   const byEntity = new Map(states.map((s) => [s.entity_id, s]));
   const registered = deps.db.select().from(devices).where(eq(devices.userId, deps.userId)).all();
 

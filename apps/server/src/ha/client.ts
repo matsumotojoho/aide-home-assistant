@@ -32,6 +32,7 @@ export class HaRequestError extends Error {
   }
 
   static userMessage(status: number): string {
+    if (status === 0) return 'Home Assistantに接続できませんでした。少し待ってからもう一度お試しください';
     if (status === 401 || status === 403) return 'Home Assistantの認証に失敗しました。トークンを再設定してください';
     if (status === 404) return 'その機器が見つかりませんでした';
     if (status >= 500) {
@@ -59,15 +60,21 @@ export class HomeAssistantClient {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 6000);
       try {
-        const res = await fetch(`${this.baseUrl}${path}`, {
-          method,
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            'Content-Type': 'application/json',
-          },
-          body: body ? JSON.stringify(body) : undefined,
-          signal: ctrl.signal,
-        });
+        let res: Response;
+        try {
+          res = await fetch(`${this.baseUrl}${path}`, {
+            method,
+            headers: {
+              Authorization: `Bearer ${this.token}`,
+              'Content-Type': 'application/json',
+            },
+            body: body ? JSON.stringify(body) : undefined,
+            signal: ctrl.signal,
+          });
+        } catch (err) {
+          // 接続できない/タイムアウト。機器の不在と区別する
+          throw new HaRequestError(0, err instanceof Error ? err.message : String(err), path);
+        }
         if (!res.ok) {
           const detail = await res.text().catch(() => '');
           throw new HaRequestError(res.status, detail, path);
@@ -79,7 +86,14 @@ export class HomeAssistantClient {
     }
     const proxyFn = this.proxy?.();
     if (proxyFn) {
-      const { status, body: resBody } = await proxyFn({ method, path, body });
+      let status: number;
+      let resBody: unknown;
+      try {
+        ({ status, body: resBody } = await proxyFn({ method, path, body }));
+      } catch (err) {
+        // Mac Agentが未接続・再接続中など。機器の不在と区別する
+        throw new HaRequestError(0, err instanceof Error ? err.message : String(err), path);
+      }
       if (status < 200 || status >= 300) {
         throw new HaRequestError(status, JSON.stringify(resBody).slice(0, 300), path);
       }
@@ -92,11 +106,20 @@ export class HomeAssistantClient {
     return (await this.request('GET', '/api/states')) as HaState[];
   }
 
+  /**
+   * 機器の状態を取得する。**存在しない場合のみ null** を返す。
+   * 通信できない場合は例外を投げる。
+   *
+   * かつては全ての例外を握り潰して null を返していたため、
+   * Home Assistantが落ちている・Mac Agentが再接続中といった状況でも
+   * 「その機器が見つかりませんでした」と表示され、機器側の故障と誤診させていた。
+   */
   async getState(entityId: string): Promise<HaState | null> {
     try {
       return (await this.request('GET', `/api/states/${entityId}`)) as HaState;
-    } catch {
-      return null;
+    } catch (err) {
+      if (err instanceof HaRequestError && err.status === 404) return null;
+      throw err;
     }
   }
 
