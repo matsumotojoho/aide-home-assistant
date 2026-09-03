@@ -27,6 +27,8 @@ import { Orchestrator } from './orchestrator.js';
 import { Scheduler } from './scheduler.js';
 import { createApi } from './routes/api.js';
 import { createAlexaApp } from './alexa/skill.js';
+import { AlexaOAuth } from './alexa/oauth.js';
+import { handleDirective } from './alexa/smarthome.js';
 import { GoogleAuth } from './google/oauth.js';
 import { MessagingService } from './messaging/channels.js';
 
@@ -139,6 +141,86 @@ async function main(): Promise<void> {
       console.error('[google] コード交換失敗:', err);
       return html('連携に失敗しました。設定をやり直してください。');
     }
+  });
+
+  // ---- Alexa スマートホームスキル (標準の言い方でHA経由にする) ----
+  const alexaOAuth = new AlexaOAuth(db, {
+    clientId: config.alexa.clientId,
+    clientSecret: config.alexa.clientSecret,
+  });
+
+  // アカウントリンクの同意画面。ログイン済みならそのまま認可コードを返す
+  app.get('/alexa/oauth/authorize', async (c) => {
+    const clientId = c.req.query('client_id') ?? '';
+    const redirectUri = c.req.query('redirect_uri') ?? '';
+    const state = c.req.query('state') ?? '';
+    const page = (msg: string) =>
+      c.html(
+        `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+          `<body style="font-family:-apple-system,sans-serif;padding:40px;text-align:center;line-height:1.8">` +
+          `<p>${msg}</p></body>`,
+      );
+    if (!alexaOAuth.configured()) return page('Alexa連携が未設定です。設定タブから設定してください。');
+    if (!alexaOAuth.verifyClient(clientId)) return page('連携情報が一致しません。');
+    if (!alexaOAuth.isAllowedRedirect(redirectUri)) return page('リダイレクト先が許可されていません。');
+
+    const uid = await auth.verifySession(c);
+    if (!uid) {
+      // 未ログインならログインさせてから戻す
+      return c.redirect(`/?next=${encodeURIComponent(c.req.url)}`);
+    }
+    const code = alexaOAuth.issueCode(uid, clientId, redirectUri);
+    const url = new URL(redirectUri);
+    url.searchParams.set('code', code);
+    if (state) url.searchParams.set('state', state);
+    return c.redirect(url.toString());
+  });
+
+  // トークンエンドポイント (Alexaのサーバーから呼ばれる)
+  app.post('/alexa/oauth/token', async (c) => {
+    const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
+    const get = (k: string) => String((form as Record<string, unknown>)[k] ?? '');
+    // client_secret_basic にも対応する
+    let clientId = get('client_id');
+    let clientSecret = get('client_secret');
+    const authz = c.req.header('authorization') ?? '';
+    if (authz.startsWith('Basic ')) {
+      const [id, secret] = Buffer.from(authz.slice(6), 'base64').toString('utf8').split(':');
+      clientId = clientId || id;
+      clientSecret = clientSecret || secret;
+    }
+    if (!alexaOAuth.verifyClient(clientId, clientSecret)) {
+      return c.json({ error: 'invalid_client' }, 401);
+    }
+    const grantType = get('grant_type');
+    const tokens =
+      grantType === 'refresh_token'
+        ? alexaOAuth.refresh(get('refresh_token'))
+        : alexaOAuth.exchangeCode(get('code'), clientId, get('redirect_uri'));
+    if (!tokens) return c.json({ error: 'invalid_grant' }, 400);
+    return c.json({ token_type: 'Bearer', ...tokens });
+  });
+
+  // スマートホームのディレクティブ本体 (Lambdaが中継してくる)
+  app.post('/alexa/smarthome', async (c) => {
+    // Lambdaとの共有シークレットで保護する (Alexaの署名はLambda側で完結するため)
+    const presented = c.req.header('x-aide-lambda-secret') ?? '';
+    if (!config.alexa.lambdaSecret || presented !== config.alexa.lambdaSecret) {
+      return c.json({ error: 'unauthorized' }, 401);
+    }
+    const body = await c.req.json().catch(() => null);
+    if (!body) return c.json({ error: 'invalid body' }, 400);
+    const result = await handleDirective(
+      {
+        db,
+        ha,
+        registry,
+        buildToolContext,
+        resolveUser: (token) => alexaOAuth.verifyAccessToken(token),
+      },
+      body,
+    );
+    return c.json(result);
   });
 
   // Alexa Custom Skill (Phase 2)。/api配下ではなくトップレベル (セッション認証でなく署名検証)

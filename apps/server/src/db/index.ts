@@ -100,6 +100,17 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL, endpoint TEXT NOT NULL UNIQUE, keys TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+-- Alexaアカウントリンク用のOAuth2。Alexaスマートホームスキルは
+-- 「Alexaユーザー ↔ このシステムのユーザー」を結ぶためにOAuth2を要求する。
+CREATE TABLE IF NOT EXISTS oauth_codes (
+  code TEXT PRIMARY KEY, user_id TEXT NOT NULL, client_id TEXT NOT NULL,
+  redirect_uri TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+  token TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL,
+  expires_at TEXT, created_at TEXT NOT NULL, last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_user ON oauth_tokens (user_id, kind);
 CREATE TABLE IF NOT EXISTS tool_connections (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL, provider TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'disconnected', config TEXT,

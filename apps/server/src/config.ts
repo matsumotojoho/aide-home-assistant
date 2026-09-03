@@ -48,6 +48,13 @@ export const config = {
     privateKey: process.env.VAPID_PRIVATE_KEY ?? '',
     subject: process.env.VAPID_SUBJECT ?? 'mailto:owner@example.com',
   },
+  alexa: {
+    // アカウントリンク用。Alexa開発者コンソールに同じ値を登録する
+    clientId: process.env.ALEXA_CLIENT_ID ?? '',
+    clientSecret: process.env.ALEXA_CLIENT_SECRET ?? '',
+    // Lambda ↔ このサーバー間の共有シークレット
+    lambdaSecret: process.env.ALEXA_LAMBDA_SECRET ?? '',
+  },
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
   openaiApiKey: process.env.OPENAI_API_KEY ?? '',
   timezone: 'Asia/Tokyo',
