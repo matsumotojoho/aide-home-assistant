@@ -18,8 +18,13 @@ const norm = (s: string) => s.normalize('NFKC').trim();
 const TYPE_KEYWORDS: Array<{ re: RegExp; type: string }> = [
   { re: /エアコン|クーラー|冷房|暖房|除湿/, type: 'climate' },
   { re: /テレビ|TV/i, type: 'tv' },
+  { re: /カーテン|ブラインド|シャッター|雨戸/, type: 'cover' },
   { re: /電気|照明|ライト|明かり|あかり/, type: 'light' },
 ];
+
+// カーテン等は「つけて/消して」ではなく「開けて/閉めて」で操作する
+const OPEN_RE = /(開けて|あけて|開いて|ひらいて|オープン)/;
+const CLOSE_RE = /(閉めて|しめて|閉じて|とじて|クローズ)/;
 
 const ON_RE = /(つけて|付けて|点けて|オンに|ONに|入れて|起動して)/i;
 const OFF_RE = /(消して|けして|切って|オフに|OFFに|止めて|停止して)/i;
@@ -39,7 +44,7 @@ const MAC_RE = /(Mac|マック|PC|パソコン|ターミナル|ファイル|フ�
 
 // 家電関連語 (曖昧でも家電文脈と判断する手がかり)
 const HOME_CONTEXT_RE =
-  /部屋|家|リビング|寝室|エアコン|クーラー|冷房|暖房|除湿|照明|電気|ライト|明かり|テレビ|温度|湿度|室温|明るく|暗く/;
+  /部屋|家|リビング|寝室|エアコン|クーラー|冷房|暖房|除湿|照明|電気|ライト|明かり|テレビ|温度|湿度|室温|明るく|暗く|カーテン|ブラインド|シャッター|雨戸/;
 
 // ON/OFFのサービス名。HAのドメインは種別ではなく entity_id から決まる点に注意
 // (例: 赤外線リモコンの照明は type=light でも entity_id は switch.* になる)。
@@ -48,6 +53,8 @@ const SERVICE_BY_TYPE: Record<string, { on: string; off: string }> = {
   tv: { on: 'turn_on', off: 'turn_off' },
   switch: { on: 'turn_on', off: 'turn_off' },
   climate: { on: 'turn_on', off: 'turn_off' },
+  // HAのcoverドメイン。開ける=on側、閉める=off側として扱う
+  cover: { on: 'open_cover', off: 'close_cover' },
 };
 
 /** HAのサービス呼び出しは対象エンティティ自身のドメインに向ける必要がある */
@@ -64,6 +71,7 @@ const TYPE_LABEL: Record<string, string> = {
   climate: 'エアコン',
   tv: 'テレビ',
   switch: 'スイッチ',
+  cover: 'カーテン',
 };
 
 function groupLabel(candidates: DeviceInfo[], room: string | null): string {
@@ -195,8 +203,10 @@ export function classify(rawText: string, devices: DeviceInfo[], defaultRoom = '
     }
 
     // ON/OFF
-    const isOn = ON_RE.test(text);
-    const isOff = OFF_RE.test(text);
+    // カーテン等は開閉の語彙で判定する (「つけて」とは言わない)
+    const allCovers = candidates.length > 0 && candidates.every((c) => c.type === 'cover');
+    const isOn = allCovers ? OPEN_RE.test(text) : ON_RE.test(text);
+    const isOff = allCovers ? CLOSE_RE.test(text) : OFF_RE.test(text);
     if ((isOn || isOff) && !(isOn && isOff) && candidates.length > 0) {
       // まとめて操作するには、HAのドメインとサービス名が全候補で一致している必要がある
       const domains = new Set(candidates.map((c) => domainOf(c.entityId)));
@@ -210,8 +220,12 @@ export function classify(rawText: string, devices: DeviceInfo[], defaultRoom = '
           domain: [...domains][0],
           service: isOn ? svc.on : svc.off,
           data: {},
-          speak: isOn ? `${label}をつけました` : `${label}を消しました`,
-          description: `${label} → ${isOn ? 'ON' : 'OFF'}`,
+          speak: allCovers
+            ? `${label}を${isOn ? '開けました' : '閉めました'}`
+            : isOn
+              ? `${label}をつけました`
+              : `${label}を消しました`,
+          description: `${label} → ${allCovers ? (isOn ? '開' : '閉') : isOn ? 'ON' : 'OFF'}`,
         };
       }
     }

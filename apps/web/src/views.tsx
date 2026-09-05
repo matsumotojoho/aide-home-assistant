@@ -1056,6 +1056,7 @@ export function SettingsView() {
             <option value="light">照明</option>
             <option value="climate">エアコン</option>
             <option value="tv">テレビ</option>
+            <option value="cover">カーテン・ブラインド</option>
             <option value="switch">スイッチ</option>
             <option value="sensor">センサー</option>
           </select>

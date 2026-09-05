@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classify } from '../src/router/classifier.js';
+import { classify, type DeviceInfo } from '../src/router/classifier.js';
 import { TEST_DEVICES } from './helpers.js';
 
 describe('Router classifier', () => {
@@ -189,5 +189,42 @@ describe('状態確認の高速パス (Alexaの8秒制限対策)', () => {
     }
     // 現在の天気は高速パスのまま
     expect(classify('今の天気は', TEST_DEVICES).kind).toBe('status');
+  });
+});
+
+describe('カーテン (cover)', () => {
+  const devs: DeviceInfo[] = [
+    { entityId: 'cover.bedroom_curtain', name: '寝室のカーテン', room: '寝室', type: 'cover', aliases: ['カーテン'] },
+    { entityId: 'light.dian_qi', name: '寝室の電気', room: '寝室', type: 'light', aliases: ['電気'] },
+  ];
+
+  it('「カーテン開けて」で open_cover を呼ぶ', () => {
+    const r = classify('寝室のカーテン開けて', devs);
+    expect(r.kind).toBe('home_direct');
+    if (r.kind !== 'home_direct') return;
+    expect(r.service).toBe('open_cover');
+    expect(r.domain).toBe('cover');
+    expect(r.speak).toContain('開けました');
+  });
+
+  it('「カーテン閉めて」で close_cover を呼ぶ', () => {
+    const r = classify('カーテン閉めて', devs);
+    expect(r.kind).toBe('home_direct');
+    if (r.kind !== 'home_direct') return;
+    expect(r.service).toBe('close_cover');
+  });
+
+  // カーテンに「つけて」とは言わない。取り違えて照明を操作しないこと
+  it('「電気つけて」はカーテンに当たらない', () => {
+    const r = classify('寝室の電気つけて', devs);
+    expect(r.kind).toBe('home_direct');
+    if (r.kind !== 'home_direct') return;
+    expect(r.entityIds).toEqual(['light.dian_qi']);
+    expect(r.service).toBe('turn_on');
+  });
+
+  // 「ちょっとだけ開けて」のような曖昧表現はClaudeへ
+  it('曖昧な開閉はClaudeへ回す', () => {
+    expect(classify('カーテン少しだけ開けて', devs).kind).toBe('home_ambiguous');
   });
 });

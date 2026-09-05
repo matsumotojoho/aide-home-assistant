@@ -20,6 +20,7 @@ const NS = {
   thermostat: 'Alexa.ThermostatController',
   temperature: 'Alexa.TemperatureSensor',
   lock: 'Alexa.LockController',
+  range: 'Alexa.RangeController',
   authorization: 'Alexa.Authorization',
   base: 'Alexa',
 } as const;
@@ -103,6 +104,53 @@ function capabilitiesFor(type: string, entityId: string) {
         withState(NS.temperature, ['temperature']),
       ],
       categories: ['THERMOSTAT'],
+    };
+  }
+  if (type === 'cover') {
+    // カーテンは開度(0〜100%)として扱い、「開けて/閉めて」は semantics で紐づける
+    return {
+      caps: [
+        ...base,
+        {
+          type: 'AlexaInterface',
+          interface: NS.range,
+          version: '3',
+          instance: 'Curtain.Position',
+          properties: {
+            supported: [{ name: 'rangeValue' }],
+            proactivelyReported: false,
+            retrievable: true,
+          },
+          capabilityResources: {
+            friendlyNames: [
+              { '@type': 'asset', value: { assetId: 'Alexa.Setting.Opening' } },
+            ],
+          },
+          configuration: {
+            supportedRange: { minimumValue: 0, maximumValue: 100, precision: 10 },
+            unitOfMeasure: 'Alexa.Unit.Percent',
+          },
+          semantics: {
+            actionMappings: [
+              {
+                '@type': 'ActionsToDirective',
+                actions: ['Alexa.Actions.Close', 'Alexa.Actions.Lower'],
+                directive: { name: 'SetRangeValue', payload: { rangeValue: 0 } },
+              },
+              {
+                '@type': 'ActionsToDirective',
+                actions: ['Alexa.Actions.Open', 'Alexa.Actions.Raise'],
+                directive: { name: 'SetRangeValue', payload: { rangeValue: 100 } },
+              },
+            ],
+            stateMappings: [
+              { '@type': 'StatesToValue', states: ['Alexa.States.Closed'], value: 0 },
+              { '@type': 'StatesToRange', states: ['Alexa.States.Open'], range: { minimumValue: 1, maximumValue: 100 } },
+            ],
+          },
+        },
+      ],
+      categories: ['INTERIOR_BLIND'],
     };
   }
   if (type === 'lock') {
@@ -241,6 +289,23 @@ async function control(
     return await successResponse(deps, entityId, endpointId, correlationToken);
   }
 
+  if (namespace === NS.range) {
+    let target: number;
+    if (name === 'AdjustRangeValue') {
+      const state = await deps.ha.getState(entityId);
+      const current = Number(state?.attributes?.current_position ?? 0);
+      target = current + Number(payload.rangeValueDelta ?? 0);
+    } else {
+      target = Number(payload.rangeValue ?? 0);
+    }
+    target = Math.max(0, Math.min(100, Math.round(target)));
+    // 全開・全閉は専用サービスの方が確実 (位置指定に対応しない機器がある)
+    if (target === 0) await exec('close_cover');
+    else if (target === 100) await exec('open_cover');
+    else await exec('set_cover_position', { position: target });
+    return await successResponse(deps, entityId, endpointId, correlationToken);
+  }
+
   if (namespace === NS.lock) {
     if (name === 'Unlock') {
       // 解錠はRisk Engineが承認必須にしている。Alexaからは即時解錠させない
@@ -317,6 +382,17 @@ function propertiesFor(entityId: string, state: HaState | null): unknown[] {
     if (typeof current === 'number') {
       props.push(prop(NS.temperature, 'temperature', { value: current, scale: 'CELSIUS' }));
     }
+  } else if (domain === 'cover') {
+    const pos = state.attributes?.current_position;
+    const value = typeof pos === 'number' ? pos : state.state === 'open' ? 100 : 0;
+    props.push({
+      namespace: NS.range,
+      name: 'rangeValue',
+      instance: 'Curtain.Position',
+      value,
+      timeOfSample: now,
+      uncertaintyInMilliseconds: 1000,
+    });
   } else if (domain === 'lock') {
     props.push(prop(NS.lock, 'lockState', state.state === 'locked' ? 'LOCKED' : 'UNLOCKED'));
   } else if (domain === 'sensor') {
