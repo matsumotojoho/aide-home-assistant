@@ -74,10 +74,22 @@ const TYPE_LABEL: Record<string, string> = {
   cover: 'カーテン',
 };
 
-function groupLabel(candidates: DeviceInfo[], room: string | null): string {
+export function groupLabel(candidates: DeviceInfo[], room: string | null): string {
   if (candidates.length === 1) return candidates[0].name;
   const type = TYPE_LABEL[candidates[0].type] ?? '機器';
   return room ? `${room}の${type}` : type;
+}
+
+/**
+ * 「寝室の電気」のように部屋名+種別語だけで出来ている呼び名かどうか。
+ * この形の名前は、その1台を指しているのか部屋のその種別全体を指しているのかを
+ * 名前からは区別できない。
+ * (実環境: light.dian_qi の名前が「寝室の電気」で、同じ寝室に「寝室の電球5〜7」がある)
+ */
+function isGenericName(alias: string, room: string): boolean {
+  let rest = alias.normalize('NFKC').split(room).join('');
+  for (const { re } of TYPE_KEYWORDS) rest = rest.replace(new RegExp(re.source, 'g'), '');
+  return rest.replace(/[のっをはがにでとへ\s\u3000・\-ー]/g, '').length === 0;
 }
 
 function findRoom(text: string, devices: DeviceInfo[]): string | null {
@@ -165,6 +177,19 @@ export function classify(rawText: string, devices: DeviceInfo[], defaultRoom = '
       candidates = candidates.filter((d) => d.room === room);
     }
 
+    // 「寝室の電気」のような総称で呼ばれたら、同じ部屋の同種デバイス全体に広げる。
+    // (エイリアス一致が1台あるとここで確定してしまい、同室の電球3つが消え残っていた。
+    //  「全部消えてない」と何度も指摘され、そのたびに同じ記憶が保存されていた)
+    if (room && typeHit && candidates.length > 0) {
+      const allGeneric = candidates.every((d) =>
+        [d.name, ...d.aliases].some((a) => a && text.includes(a) && isGenericName(a, room)),
+      );
+      if (allGeneric) {
+        const sameRoomType = devices.filter((d) => d.type === typeHit.type && d.room === room);
+        if (sameRoomType.length > candidates.length) candidates = sameRoomType;
+      }
+    }
+
     if (candidates.length === 0 && typeHit) {
       candidates = devices.filter((d) => d.type === typeHit.type);
       if (room) candidates = candidates.filter((d) => d.room === room);
@@ -197,6 +222,7 @@ export function classify(rawText: string, devices: DeviceInfo[], defaultRoom = '
           service: 'set_temperature',
           data,
           speak: `${label}を${temp}度にしました`,
+          label,
           description: `${label} → ${temp}℃${modeMatch ? ` (${modeMatch[1]})` : ''}`,
         };
       }
@@ -225,6 +251,7 @@ export function classify(rawText: string, devices: DeviceInfo[], defaultRoom = '
             : isOn
               ? `${label}をつけました`
               : `${label}を消しました`,
+          label,
           description: `${label} → ${allCovers ? (isOn ? '開' : '閉') : isOn ? 'ON' : 'OFF'}`,
         };
       }

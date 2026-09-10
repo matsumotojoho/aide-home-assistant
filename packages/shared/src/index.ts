@@ -13,6 +13,8 @@ export type Intent =
       service: string;
       data?: Record<string, unknown>;
       speak: string;
+      /** speak/description の中で対象を指している呼び名。記憶で対象が増えたとき差し替える */
+      label: string;
       description: string;
     }
   | { kind: 'home_ambiguous' }

@@ -54,10 +54,15 @@ Alexa (Phase 2)     スマホPWA        PC Web
 - **schedule**: 時刻表現+家電/快適文脈 → Claudeがtasks.createで予約
 - **mac**: PC操作語彙 (家電文脈なし)
 - **home_direct**: デバイス・操作が一意に決まるON/OFF/温度指定 → 即実行
+  この経路はClaudeを通らないため記憶も読まれない。「この機器はこれらと必ずまとめて操作する」
+  という好みだけは `memory.entityGroups()` から決定的に反映する (同一ドメイン・同一部屋の登録機器に限る)
 - **home_ambiguous**: 家電文脈だが曖昧 (「いい感じ」「ちょっと暗く」) → Claude
 - **consult**: それ以外 → Claude
 
 デバイス解決は `devices` テーブル (entity_id / 日本語名 / 部屋 / 種別 / エイリアス) を使用。部屋省略時は `router.default_room` 設定で補完。
+呼び名が「寝室の電気」のように部屋名+種別語だけで出来ている場合は、その部屋の同種デバイス全体に広げる
+(1台の名前が発話にそのまま一致して確定してしまい、同室の残りが操作されない事故を防ぐ)。
+「寝室の電球6」のように個体を特定できる名前で呼ばれたときは広げない。
 
 重要な制約 (実機検証で判明):
 - **HAのドメインは種別ではなく entity_id から決める。** 赤外線リモコン経由の照明は種別=light でも entity_id は `switch.*`。`light.turn_on` を `switch.*` へ投げるとHAは200を返しつつ何も実行しない
@@ -122,7 +127,10 @@ Claudeとの対話はJSONプロトコル (Provider非依存):
 LLM 1回あたり8〜10秒かかるため、これで曖昧な指示の応答が約半分になる。失敗があった場合は
 結果を渡して考え直させる。
 
-最大6イテレーションのツールループ。Context Builderは System policy / 現在時刻 / 登録デバイス / 関連記憶 (FTS検索) / 直近会話 / 予約タスク / ユーザー依頼のみを送る (全履歴は送らない)。
+最大6イテレーションのツールループ。Context Builderは System policy / 現在時刻 / 登録デバイス / **好み・決定事項 (全件)** / 関連記憶 (FTS検索) / 直近会話 / 予約タスク / ユーザー依頼のみを送る (全履歴は送らない)。
+
+好み (`preference`) と決定事項 (`decision`) は検索せず毎回全件渡す。日本語は分かち書きしないため
+検索での取りこぼしが避けられず、渡らなければ同じ失敗を繰り返して同じ学習が積み上がるため。
 
 Anthropic API Provider有効時はネイティブtool_useへの置き換えが可能な構造 (Provider内で変換)。
 
@@ -159,7 +167,11 @@ Mac mini常駐。**Mac→BackendへのOutbound WebSocket** (自宅ルーター�
 ### データベース (`src/db/`)
 SQLite + Drizzle ORM (PostgreSQL移行可能)。UUID主キー、日時は内部UTC / UI表示Asia/Tokyo。
 テーブル: users / settings / conversations / messages / memories (+FTS5 trigram) / preferences / devices / tasks / task_runs / actions / undo_records / permissions / approvals / notifications / push_subscriptions / tool_connections。
-長期記憶検索はSQLite FTS5 (trigram=日本語対応) + メタデータ。ローカル多言語Embeddingは後から追加できる構造 (memoriesにカラム追加+検索関数差し替え)。Embeddingのための有料APIは使わない。
+長期記憶検索はSQLite FTS5 (trigram=日本語対応) + メタデータ。
+クエリは精度の高い順に3段階で試す: 空白区切り語のAND → 同OR → 助詞で切り直した語のOR。
+日本語は分かち書きしないため、話し言葉は文まるごとが1語として届き、そのままでは
+フレーズ検索になって必ず0件になる (実運用で発覚)。
+同じ学習の積み増しは `write()` 時に検出してまとめる (同一タイトル / 同じentity_idの組 / 本文bigramのDice係数)。ローカル多言語Embeddingは後から追加できる構造 (memoriesにカラム追加+検索関数差し替え)。Embeddingのための有料APIは使わない。
 
 ## 技術選定の理由 (仕様書23/24からの変更点)
 

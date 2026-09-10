@@ -228,3 +228,71 @@ describe('カーテン (cover)', () => {
     expect(classify('カーテン少しだけ開けて', devs).kind).toBe('home_ambiguous');
   });
 });
+
+describe('総称で呼ばれた照明はまとめて操作する (実運用で繰り返し指摘された不具合の回帰テスト)', () => {
+  // 実環境: light.dian_qi の名前が「寝室の電気」で、同じ寝室に電球が3つある。
+  // 名前がそのまま発話に一致するため1台で確定してしまい、電球3つが消え残っていた。
+  // ユーザーは1週間で5回同じ指摘をし、そのたびに同じ記憶が保存されていた。
+  const bedroom: DeviceInfo[] = [
+    { entityId: 'light.dian_qi', name: '寝室の電気', room: '寝室', type: 'light', aliases: [] },
+    { entityId: 'light.dian_qiu_5', name: '寝室の電球5', room: '寝室', type: 'light', aliases: [] },
+    { entityId: 'light.tradfri_bulb_6', name: '寝室の電球6', room: '寝室', type: 'light', aliases: [] },
+    { entityId: 'light.tradfri_bulb_7', name: '寝室の電球7', room: '寝室', type: 'light', aliases: [] },
+  ];
+
+  it('「寝室の電気消して」で寝室の照明4つすべてを消す', () => {
+    const r = classify('寝室の電気消して', bedroom);
+    expect(r.kind).toBe('home_direct');
+    if (r.kind !== 'home_direct') return;
+    expect(r.entityIds).toHaveLength(4);
+    expect(r.entityIds).toContain('light.tradfri_bulb_7');
+    expect(r.service).toBe('turn_off');
+    // 1台の名前ではなく、まとめた呼び名で報告する
+    expect(r.speak).toBe('寝室の照明を消しました');
+  });
+
+  it('「寝室の電気を全部消して」も同じ4つ', () => {
+    const r = classify('寝室の電気を全部消して', bedroom);
+    expect(r.kind).toBe('home_direct');
+    if (r.kind !== 'home_direct') return;
+    expect(r.entityIds).toHaveLength(4);
+  });
+
+  it('つける側も同じく4つまとめて', () => {
+    const r = classify('寝室の電気つけて', bedroom);
+    expect(r.kind).toBe('home_direct');
+    if (r.kind !== 'home_direct') return;
+    expect(r.entityIds).toHaveLength(4);
+    expect(r.service).toBe('turn_on');
+  });
+
+  it('電球を名指ししたときは広げない', () => {
+    const r = classify('寝室の電球6消して', bedroom);
+    expect(r.kind).toBe('home_direct');
+    if (r.kind !== 'home_direct') return;
+    expect(r.entityIds).toEqual(['light.tradfri_bulb_6']);
+  });
+
+  it('個体名に種別語が入っていても広げない (寝室のライト2)', () => {
+    const devs: DeviceInfo[] = [
+      { entityId: 'light.b1', name: '寝室のライト1', room: '寝室', type: 'light', aliases: [] },
+      { entityId: 'light.b2', name: '寝室のライト2', room: '寝室', type: 'light', aliases: [] },
+    ];
+    const r = classify('寝室のライト2つけて', devs);
+    expect(r.kind).toBe('home_direct');
+    if (r.kind !== 'home_direct') return;
+    expect(r.entityIds).toEqual(['light.b2']);
+  });
+
+  it('別の部屋には広がらない', () => {
+    const mixed: DeviceInfo[] = [
+      ...bedroom,
+      { entityId: 'light.rihinku1', name: 'リビング1', room: 'リビング', type: 'light', aliases: [] },
+    ];
+    const r = classify('寝室の電気消して', mixed);
+    expect(r.kind).toBe('home_direct');
+    if (r.kind !== 'home_direct') return;
+    expect(r.entityIds).not.toContain('light.rihinku1');
+    expect(r.entityIds).toHaveLength(4);
+  });
+});

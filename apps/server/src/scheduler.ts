@@ -123,5 +123,8 @@ export class Scheduler {
     const retention = this.deps.settings.get('memory.retention');
     const purged = this.deps.memory.purgeExpired(retention);
     if (purged > 0) console.log(`[scheduler] 保存期間(${retention})超過の記憶を${purged}件削除`);
+    // 同じ学習が積み上がっていたらまとめる (増殖するとプロンプトが好みで埋まる)
+    const merged = this.deps.memory.dedupe();
+    if (merged > 0) console.log(`[scheduler] 重複した記憶を${merged}件まとめました`);
   }
 }

@@ -9,7 +9,7 @@ import { v4 as uuid } from 'uuid';
 import type { AgentTurn, Intent, ToolCallRequest } from '@aide/shared';
 import type { Db } from './db/index.js';
 import { conversations, devices, messages, tasks } from './db/schema.js';
-import { classify, type DeviceInfo } from './router/classifier.js';
+import { classify, groupLabel, type DeviceInfo } from './router/classifier.js';
 import type { ProviderSelector } from './llm/index.js';
 import { ProviderUnavailableError } from './llm/index.js';
 import type { ToolRegistry, ToolContext } from './tools/index.js';
@@ -85,12 +85,20 @@ export class Orchestrator {
 
     if (intent.kind === 'home_direct') {
       // A. 明確な家電命令 → Claude不使用・即実行 (Claude停止時も動作)
+      // この経路はClaudeを通らないので記憶も読まれない。「この機器はこれらと必ず
+      // まとめて操作する」という好みだけは、ここで決定的に反映する。
+      const targets = expandByMemory(intent.entityIds, ctx.memory.entityGroups(), deviceInfos);
       const result = await this.deps.registry.execute(
         'home.execute',
-        { entity_id: intent.entityIds, domain: intent.domain, service: intent.service, data: intent.data },
+        { entity_id: targets, domain: intent.domain, service: intent.service, data: intent.data },
         ctx,
       );
-      reply = result.ok ? intent.speak : `すみません、${result.error ?? '実行できませんでした'}`;
+      // 対象が増えたら呼び名も作り直す (1台の名前のまま4台操作したと言わない)
+      const speak =
+        targets.length > intent.entityIds.length
+          ? intent.speak.replace(intent.label, labelFor(targets, deviceInfos))
+          : intent.speak;
+      reply = result.ok ? speak : `すみません、${result.error ?? '実行できませんでした'}`;
     } else if (intent.kind === 'recall') {
       // 保存済みの直前の回答を読み上げ直す (Claude不要)
       reply = answerRecall(db, params.userId);
@@ -285,7 +293,8 @@ export class Orchestrator {
       '',
       '# 状況の使い方',
       '- 冒頭に現在時刻・外気温・天気・家電の現在値が渡される。これで足りるならツールを呼ばない。',
-      '- 足りない場合だけツールを使う。過去の好みは memory.search で引く。',
+      '- 足りない場合だけツールを使う。ユーザーの好み・決定事項は冒頭に全件渡してあるので memory.search は不要。',
+      '  (memory.search は昔の会話を探したいときだけ使う)',
       '- 家電を操作するときは渡された entity_id をそのまま使う。',
       '',
       '# 調べ物',
@@ -303,6 +312,8 @@ export class Orchestrator {
       '「覚えて」と言われなくてよい。次回から同じ判断ができるように、条件も含めて書く。',
       '  例: 「ちょっと寒い」と言われて27度にした → title:"夏の寝室の設定温度" content:"27度を好む。26度だと寒いと言われた"',
       '単発の指示 (今日だけ・今回だけ) は保存しない。',
+      '同じ内容が既に「ユーザーの好み・決定事項」にあるなら保存し直さない。',
+      '直すべき点があるときだけ、条件を具体化した1件として書き直す。',
       '',
       '# 予約',
       '時刻指定のある依頼は tasks.create で予約し reevaluate:true を付ける。',
@@ -348,8 +359,19 @@ export class Orchestrator {
       );
     }
 
-    // 関連する記憶 (FTS検索)
-    const related = ctx.memory.search(params.userText, 5);
+    // 好み・決定事項は毎回全件渡す。
+    // 日本語は検索での取りこぼしが避けられず、渡らなければ同じ失敗を繰り返すため。
+    const pinned = ctx.memory.pinned(40);
+    if (pinned.length > 0) {
+      parts.push(
+        'ユーザーの好み・決定事項 (毎回必ず守る):\n' +
+          pinned.map((m) => `- ${m.title}: ${m.content.slice(0, 300)}`).join('\n'),
+      );
+    }
+
+    // 関連する記憶 (FTS検索)。好みは上で渡し済みなので除く
+    const pinnedIds = new Set(pinned.map((m) => m.id));
+    const related = ctx.memory.search(params.userText, 5).filter((m) => !pinnedIds.has(m.id));
     if (related.length > 0) {
       parts.push(
         '関連する記憶:\n' + related.map((m) => `- [${m.kind}] ${m.title}: ${m.content.slice(0, 200)}`).join('\n'),
@@ -394,6 +416,42 @@ export class Orchestrator {
     parts.push(`ユーザーの依頼: ${params.userText}`);
     return parts.join('\n\n');
   }
+}
+
+/**
+ * 記憶にある「まとめて操作する機器の組」で操作対象を広げる。
+ * 事故を防ぐため、登録済み・同じHAドメイン・同じ部屋の機器にしか広げない。
+ */
+export function expandByMemory(entityIds: string[], groups: string[][], devices: DeviceInfo[]): string[] {
+  if (entityIds.length === 0 || groups.length === 0) return entityIds;
+  const byId = new Map(devices.map((d) => [d.entityId, d]));
+  const domainOf = (id: string) => id.split('.')[0];
+  const domains = new Set(entityIds.map(domainOf));
+  const rooms = new Set(entityIds.map((id) => byId.get(id)?.room ?? null));
+  if (domains.size !== 1 || rooms.size !== 1) return entityIds;
+  const [domain] = [...domains];
+  const [room] = [...rooms];
+
+  const initial = new Set(entityIds);
+  const out = new Set(entityIds);
+  for (const group of groups) {
+    if (!group.some((id) => initial.has(id))) continue;
+    for (const id of group) {
+      const d = byId.get(id);
+      if (!d) continue; // 登録されていない機器には触らない
+      if (domainOf(id) !== domain || d.room !== room) continue;
+      out.add(id);
+    }
+  }
+  return [...out];
+}
+
+/** 広がった対象の呼び名。全部同じ部屋ならその部屋名でまとめる */
+function labelFor(entityIds: string[], devices: DeviceInfo[]): string {
+  const hit = devices.filter((d) => entityIds.includes(d.entityId));
+  if (hit.length === 0) return entityIds.join('・');
+  const rooms = new Set(hit.map((d) => d.room));
+  return groupLabel(hit, rooms.size === 1 ? [...rooms][0] : null);
 }
 
 // ---------- LLM応答のパース (壊れたJSONにもある程度耐える) ----------
