@@ -236,6 +236,36 @@ interface DeviceRow {
   type: string;
 }
 
+/**
+ * 種別ごとのON/OFFサービス。HAはドメインによってサービス名が違う。
+ * (cover に turn_on は無い。呼ぶと「サービスが見つからない」で失敗する)
+ */
+const ON_OFF_SERVICE: Record<string, { on: string; off: string }> = {
+  cover: { on: 'open_cover', off: 'close_cover' },
+};
+
+const serviceFor = (type: string, on: boolean): string => {
+  const svc = ON_OFF_SERVICE[type];
+  if (svc) return on ? svc.on : svc.off;
+  return on ? 'turn_on' : 'turn_off';
+};
+
+/** 消えている/閉じている状態。トグルのOFF側として扱う */
+const OFF_STATES = ['off', 'unavailable', 'standby', 'unknown', 'closed', 'closing'];
+
+/** カーテンと鍵はHAの状態が英語のままだと分かりにくいので置き換える */
+const STATE_LABELS: Record<string, string> = {
+  open: '開',
+  opening: '開けています',
+  closed: '閉',
+  closing: '閉めています',
+  locked: '施錠',
+  unlocked: '解錠',
+};
+
+const stateLabel = (type: string, state: string): string =>
+  type === 'cover' || type === 'lock' ? (STATE_LABELS[state] ?? state) : state;
+
 export function HomeView() {
   const [data, setData] = useState<{ configured: boolean; error: string | null; devices: DeviceRow[]; states: HaStateRow[] } | null>(null);
   const [busyId, setBusyId] = useState('');
@@ -270,7 +300,7 @@ export function HomeView() {
   const toggle = async (d: DeviceRow, on: boolean) => {
     setBusyId(d.id);
     try {
-      await api.post('/home/execute', { entityId: d.entityId, service: on ? 'turn_on' : 'turn_off' });
+      await api.post('/home/execute', { entityId: d.entityId, service: serviceFor(d.type, on) });
       setTimeout(() => void refresh(), 800);
     } finally {
       setBusyId('');
@@ -310,13 +340,16 @@ export function HomeView() {
             .filter((d) => (d.room ?? 'その他') === room)
             .map((d) => {
               const st = stateOf(d.entityId);
-              const isOn = st ? !['off', 'unavailable', 'standby', 'unknown'].includes(st.state) : false;
+              const isOn = st ? !OFF_STATES.includes(st.state) : false;
+              // センサーは操作できない。鍵は誤タップで解錠されると困るので画面からは操作させない
+              // (音声・チャット経由なら承認フローを通って操作できる)。どちらも従来トグルは機能していなかった
+              const controllable = d.type !== 'sensor' && d.type !== 'lock';
               return (
                 <div key={d.id} className="card row">
                   <div className="grow">
                     <h3>{d.name}</h3>
                     <div className="meta">
-                      {st ? st.state : '状態不明'}
+                      {st ? stateLabel(d.type, st.state) : '状態不明'}
                       {d.type === 'climate' && st?.attributes.temperature != null && (
                         <> ・設定 {String(st.attributes.temperature)}℃</>
                       )}
@@ -335,10 +368,12 @@ export function HomeView() {
                       </button>
                     </>
                   )}
-                  <label className="switch">
-                    <input type="checkbox" checked={isOn} disabled={busyId === d.id} onChange={(e) => void toggle(d, e.target.checked)} />
-                    <span className="track" />
-                  </label>
+                  {controllable && (
+                    <label className="switch">
+                      <input type="checkbox" checked={isOn} disabled={busyId === d.id} onChange={(e) => void toggle(d, e.target.checked)} />
+                      <span className="track" />
+                    </label>
+                  )}
                 </div>
               );
             })}
@@ -865,6 +900,187 @@ function DeviceRowEditor({ device, onChanged }: { device: DeviceRow; onChanged: 
   );
 }
 
+// ============ Home Assistantからの機器取り込み ============
+// 手入力だけだと後から増えた機器 (カーテンなど) が登録漏れになるため、
+// HA側を走査して差分を出し、選んだものだけ反映する。
+
+interface Candidate {
+  entityId: string;
+  name: string;
+  room: string | null;
+  type: string;
+  state: string;
+  controllable: boolean;
+}
+interface RenamedCandidate extends Candidate {
+  id: string;
+  currentName: string;
+  currentRoom: string | null;
+}
+interface MissingDevice {
+  id: string;
+  entityId: string;
+  name: string;
+  room: string | null;
+}
+interface DiscoverResult {
+  configured: boolean;
+  error: string | null;
+  found: Candidate[];
+  renamed: RenamedCandidate[];
+  missing: MissingDevice[];
+}
+
+const DEVICE_TYPE_LABELS: Record<string, string> = {
+  light: '照明',
+  climate: 'エアコン',
+  tv: 'テレビ',
+  cover: 'カーテン・ブラインド',
+  switch: 'スイッチ',
+  sensor: 'センサー',
+  lock: '鍵',
+};
+
+const typeLabel = (t: string) => DEVICE_TYPE_LABELS[t] ?? t;
+
+function DeviceDiscovery({ onChanged }: { onChanged: () => void }) {
+  const [data, setData] = useState<DiscoverResult | null>(null);
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const scan = async () => {
+    setBusy(true);
+    setMsg('');
+    try {
+      const r = await api.get<DiscoverResult>('/devices/discover');
+      setData(r);
+      // 既定でチェックするのは「新しく見つかった操作できる機器」だけ。
+      // 名前の上書きは既定で外す。Aide側の名前は手で付け直していることが多く
+      // (HAでは「TRADFRI bulb 6」でもAideでは「寝室の電球6」)、
+      // 上書きすると音声で呼べなくなるため。
+      setPicked(Object.fromEntries(r.found.map((f) => [f.entityId, f.controllable])));
+    } catch {
+      setMsg('Home Assistantを読み取れませんでした');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const apply = async () => {
+    if (!data) return;
+    setBusy(true);
+    try {
+      const res = await api.post<{ added: number; updated: number; removed: number }>('/devices/sync', {
+        add: data.found.filter((f) => picked[f.entityId]).map((f) => f.entityId),
+        rename: data.renamed.filter((f) => picked[f.id]).map((f) => f.id),
+        removeIds: data.missing.filter((m) => picked[m.id]).map((m) => m.id),
+      });
+      setMsg(`追加${res.added}件 / 名前更新${res.updated}件 / 削除${res.removed}件`);
+      setData(null);
+      onChanged();
+    } catch {
+      setMsg('更新に失敗しました');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggle = (key: string) => setPicked((p) => ({ ...p, [key]: !p[key] }));
+
+  const row = (key: string, title: string, meta: string, tag?: { label: string; tone: string }) => (
+    <label key={key} className="row" style={{ marginBottom: 6, alignItems: 'flex-start', gap: 8 }}>
+      <input
+        type="checkbox"
+        checked={Boolean(picked[key])}
+        onChange={() => toggle(key)}
+        style={{ marginTop: 4, flexShrink: 0 }}
+      />
+      <div className="grow">
+        <b>{title}</b> {tag && <span className={`pill ${tag.tone}`}>{tag.label}</span>}
+        <div className="meta">{meta}</div>
+      </div>
+    </label>
+  );
+
+  if (!data) {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <button className="btn sm secondary" disabled={busy} onClick={() => void scan()}>
+          {busy ? '読み取り中...' : 'Home Assistantから取り込む'}
+        </button>
+        <div className="meta" style={{ marginTop: 6 }}>
+          {msg || 'HAにある機器を探して、未登録のものをまとめて登録します'}
+        </div>
+      </div>
+    );
+  }
+
+  if (!data.configured || data.error) {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <div className="meta">{data.error ?? 'Home Assistantが未設定です'}</div>
+        <button className="btn sm secondary" style={{ marginTop: 6 }} onClick={() => setData(null)}>
+          閉じる
+        </button>
+      </div>
+    );
+  }
+
+  const nothing = data.found.length === 0 && data.renamed.length === 0 && data.missing.length === 0;
+
+  return (
+    <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
+      {nothing && <div className="meta">登録済みの内容とHome Assistantは一致しています</div>}
+
+      {data.found.length > 0 && (
+        <>
+          <div className="meta" style={{ marginBottom: 6 }}>新しく見つかった機器 ({data.found.length})</div>
+          {data.found.map((f) =>
+            row(
+              f.entityId,
+              f.name,
+              `${f.room ?? '部屋未設定'} / ${typeLabel(f.type)} / ${f.entityId} (${f.state})`,
+              f.controllable ? undefined : { label: 'センサー', tone: 'warn' },
+            ),
+          )}
+        </>
+      )}
+
+      {data.renamed.length > 0 && (
+        <>
+          <div className="meta" style={{ margin: '10px 0 6px' }}>
+            Home Assistant側と名前が違う機器 ({data.renamed.length}) — チェックするとHA側の名前で上書きします
+          </div>
+          {data.renamed.map((f) => row(f.id, f.currentName, `${f.currentName} → ${f.name} / ${f.entityId}`))}
+        </>
+      )}
+
+      {data.missing.length > 0 && (
+        <>
+          <div className="meta" style={{ margin: '10px 0 6px' }}>
+            Home Assistantに見つからない機器 ({data.missing.length}) — チェックすると登録を削除します
+          </div>
+          {data.missing.map((m) =>
+            row(m.id, m.name, `${m.room ?? '部屋未設定'} / ${m.entityId}`, { label: '未検出', tone: 'fail' }),
+          )}
+        </>
+      )}
+
+      <div className="row" style={{ marginTop: 10 }}>
+        {!nothing && (
+          <button className="btn sm" disabled={busy} onClick={() => void apply()}>
+            {busy ? '更新中...' : '選んだ内容で更新'}
+          </button>
+        )}
+        <button className="btn sm secondary" disabled={busy} onClick={() => setData(null)}>
+          {nothing ? '閉じる' : 'やめる'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsView() {
   const [settings, setSettings] = useState<Record<string, string>>({});
   const [perms, setPerms] = useState<PermissionRow[]>([]);
@@ -1039,6 +1255,7 @@ export function SettingsView() {
 
       <h2 className="section">デバイス登録</h2>
       <div className="card">
+        <DeviceDiscovery onChanged={refresh} />
         {devices.map((d) => (
           <DeviceRowEditor key={d.id} device={d} onChanged={refresh} />
         ))}

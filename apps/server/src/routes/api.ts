@@ -22,7 +22,8 @@ import type { PushService } from '../push.js';
 import type { SettingsService } from '../services/settings.js';
 import type { MemoryService } from '../services/memory.js';
 import type { PermissionService } from '../services/permissions.js';
-import type { HomeAssistantClient } from '../ha/client.js';
+import type { HomeAssistantClient, HaState } from '../ha/client.js';
+import { discover, toCandidate } from '../ha/discovery.js';
 import type { AgentGateway } from '../agentGateway.js';
 import { applyUndo } from '../undo.js';
 import { categorize } from '../risk.js';
@@ -209,6 +210,123 @@ export function createApi(deps: ApiDeps): Hono {
     room: z.string().nullable().optional(),
     type: z.string().min(1),
     aliases: z.array(z.string()).optional(),
+  });
+
+  /**
+   * Home Assistantの全エンティティを走査し、登録できる機器を洗い出す。
+   * 手入力だけだと後から増えた機器 (カーテンなど) が登録漏れになるため。
+   */
+  api.get('/devices/discover', async (c) => {
+    const rows = db.select().from(devices).where(eq(devices.userId, userId)).all();
+    if (!deps.ha.configured()) {
+      return c.json({ configured: false, error: 'Home Assistant未設定', found: [], renamed: [], missing: [] });
+    }
+    let states: HaState[];
+    try {
+      states = await deps.ha.getStates();
+    } catch (err) {
+      return c.json({
+        configured: true,
+        error: err instanceof Error ? err.message : String(err),
+        found: [],
+        renamed: [],
+        missing: [],
+      });
+    }
+
+    const knownRooms = rows.map((r) => r.room).filter((r): r is string => Boolean(r));
+    const candidates = discover(states, knownRooms);
+    const byEntity = new Map(rows.map((r) => [r.entityId, r]));
+
+    const found = candidates.filter((cand) => !byEntity.has(cand.entityId));
+    // HA側で表示名が変わったもの (機器を入れ替えた・名前を直した場合に追従できるように)
+    const renamed = candidates
+      .filter((cand) => byEntity.get(cand.entityId)?.name && byEntity.get(cand.entityId)!.name !== cand.name)
+      .map((cand) => {
+        const row = byEntity.get(cand.entityId)!;
+        return { ...cand, id: row.id, currentName: row.name, currentRoom: row.room };
+      });
+    // 登録済みだがHAに無いもの (機器を外した・entity_idが変わった場合)
+    const present = new Set(states.map((s) => s.entity_id));
+    const missing = rows
+      .filter((r) => !present.has(r.entityId))
+      .map((r) => ({ id: r.id, entityId: r.entityId, name: r.name, room: r.room }));
+
+    return c.json({ configured: true, error: null, found, renamed, missing });
+  });
+
+  /**
+   * 洗い出した結果を反映する。名前・種別はクライアントの申告ではなくHA側を正とする。
+   */
+  api.post('/devices/sync', async (c) => {
+    const body = z
+      .object({
+        add: z.array(z.string()).max(200).optional(),
+        rename: z.array(z.string()).max(200).optional(),
+        removeIds: z.array(z.string()).max(200).optional(),
+      })
+      .safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
+    const { add = [], rename = [], removeIds = [] } = body.data;
+
+    const rows = db.select().from(devices).where(eq(devices.userId, userId)).all();
+    const knownRooms = rows.map((r) => r.room).filter((r): r is string => Boolean(r));
+    const registered = new Set(rows.map((r) => r.entityId));
+
+    let states: HaState[] = [];
+    if (add.length > 0 || rename.length > 0) {
+      try {
+        states = await deps.ha.getStates();
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
+      }
+    }
+    const byEntity = new Map(states.map((s) => [s.entity_id, s]));
+
+    let added = 0;
+    for (const entityId of new Set(add)) {
+      if (registered.has(entityId)) continue; // 二重登録しない
+      const state = byEntity.get(entityId);
+      if (!state) continue;
+      const cand = toCandidate(state, knownRooms);
+      if (!cand) continue;
+      db.insert(devices)
+        .values({
+          id: uuid(),
+          userId,
+          entityId: cand.entityId,
+          name: cand.name,
+          room: cand.room,
+          type: cand.type,
+          aliases: JSON.stringify([]),
+          createdAt: new Date().toISOString(),
+        })
+        .run();
+      added++;
+    }
+
+    let updated = 0;
+    for (const id of new Set(rename)) {
+      const row = rows.find((r) => r.id === id);
+      if (!row) continue;
+      const state = byEntity.get(row.entityId);
+      if (!state) continue;
+      const cand = toCandidate(state, knownRooms);
+      if (!cand || cand.name === row.name) continue;
+      db.update(devices)
+        .set({ name: cand.name, room: row.room ?? cand.room })
+        .where(eq(devices.id, row.id))
+        .run();
+      updated++;
+    }
+
+    let removed = 0;
+    for (const id of new Set(removeIds)) {
+      const res = db.delete(devices).where(and(eq(devices.id, id), eq(devices.userId, userId))).run();
+      removed += res.changes;
+    }
+
+    return c.json({ ok: true, added, updated, removed });
   });
 
   api.get('/devices', (c) => {
